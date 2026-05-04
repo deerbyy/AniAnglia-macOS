@@ -12,8 +12,31 @@ final class EpisodesViewModel: ObservableObject {
     @Published var isLoadingSources = false
     @Published var isLoadingEpisodes = false
     @Published var errorMessage: String?
+    /// Locally toggled watched state, keyed by Episode.id.
+    @Published var watchedOverrides: [String: Bool] = [:]
 
     init(releaseId: Int64) { self.releaseId = releaseId }
+
+    func isWatched(_ episode: Episode) -> Bool {
+        if let v = watchedOverrides[episode.id] { return v }
+        return episode.isWatched == true
+    }
+
+    func toggleWatched(_ episode: Episode, api: AnixartAPI) async {
+        let nextWatched = !isWatched(episode)
+        watchedOverrides[episode.id] = nextWatched
+        do {
+            if nextWatched {
+                _ = try await api.markEpisodeWatched(releaseId: episode.releaseId, sourceId: episode.sourceId, position: episode.position)
+            } else {
+                _ = try await api.unmarkEpisodeWatched(releaseId: episode.releaseId, sourceId: episode.sourceId, position: episode.position)
+            }
+        } catch {
+            // Revert on failure
+            watchedOverrides[episode.id] = !nextWatched
+            errorMessage = error.localizedDescription
+        }
+    }
 
     func loadTypes(api: AnixartAPI) async {
         isLoadingTypes = true
@@ -90,7 +113,11 @@ struct EpisodesView: View {
         .navigationTitle(releaseTitle ?? "Серии")
         .task { await vm.loadTypes(api: appState.api) }
         .sheet(item: $playing) { episode in
-            EpisodePlayerSheet(episode: episode, releaseTitle: releaseTitle)
+            EpisodePlayerSheet(episode: episode, releaseTitle: releaseTitle, onClosed: {
+                if appState.auth.isAuthenticated && !vm.isWatched(episode) {
+                    Task { await vm.toggleWatched(episode, api: appState.api) }
+                }
+            })
         }
     }
 
@@ -184,9 +211,15 @@ struct EpisodesView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(vm.episodes) { episode in
-                        EpisodeRow(episode: episode) {
-                            playing = episode
-                        }
+                        EpisodeRow(
+                            episode: episode,
+                            isWatched: vm.isWatched(episode),
+                            canMark: appState.auth.isAuthenticated,
+                            onPlay: { playing = episode },
+                            onToggleWatched: {
+                                Task { await vm.toggleWatched(episode, api: appState.api) }
+                            }
+                        )
                         Divider()
                     }
                 }
@@ -197,33 +230,47 @@ struct EpisodesView: View {
 
 private struct EpisodeRow: View {
     let episode: Episode
+    let isWatched: Bool
+    let canMark: Bool
     let onPlay: () -> Void
+    let onToggleWatched: () -> Void
 
     var body: some View {
-        Button(action: onPlay) {
-            HStack(spacing: 12) {
-                Image(systemName: episode.isWatched == true ? "checkmark.circle.fill" : "play.circle.fill")
+        HStack(spacing: 12) {
+            Button(action: onToggleWatched) {
+                Image(systemName: isWatched ? "checkmark.circle.fill" : "circle")
                     .font(.title2)
-                    .foregroundStyle(episode.isWatched == true ? .green : .accentColor)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(episode.name ?? "Серия \(episode.position + 1)")
-                        .font(.body)
-                        .foregroundStyle(.primary)
-                    if let url = episode.url, !url.isEmpty {
-                        Text(host(of: url))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isWatched ? .green : .secondary)
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 4)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .disabled(!canMark)
+            .help(canMark ? (isWatched ? "Отметить как не просмотренную" : "Отметить как просмотренную") : "Войди в аккаунт, чтобы отмечать серии")
+
+            Button(action: onPlay) {
+                HStack(spacing: 12) {
+                    Image(systemName: "play.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.accentColor)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(episode.name ?? "Серия \(episode.position + 1)")
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                        if let url = episode.url, !url.isEmpty {
+                            Text(host(of: url))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
     }
 
     private func host(of url: String) -> String {
@@ -234,6 +281,7 @@ private struct EpisodeRow: View {
 struct EpisodePlayerSheet: View {
     let episode: Episode
     let releaseTitle: String?
+    var onClosed: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
@@ -258,8 +306,11 @@ struct EpisodePlayerSheet: View {
                     }
                     .help("Открыть в Safari")
                 }
-                Button("Закрыть") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
+                Button("Закрыть") {
+                    onClosed?()
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
             }
             .padding()
             Divider()

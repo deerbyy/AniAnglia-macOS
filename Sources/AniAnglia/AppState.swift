@@ -23,6 +23,7 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
     case catalog
     case search
     case bookmarks
+    case history
     case profile
 
     var id: String { rawValue }
@@ -33,6 +34,7 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         case .catalog: return "Каталог"
         case .search: return "Поиск"
         case .bookmarks: return "Закладки"
+        case .history: return "История"
         case .profile: return "Профиль"
         }
     }
@@ -43,6 +45,7 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         case .catalog: return "square.grid.2x2"
         case .search: return "magnifyingglass"
         case .bookmarks: return "bookmark"
+        case .history: return "clock"
         case .profile: return "person.crop.circle"
         }
     }

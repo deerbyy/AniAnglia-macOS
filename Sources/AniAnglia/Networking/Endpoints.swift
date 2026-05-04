@@ -121,6 +121,31 @@ extension AnixartAPI {
         try await get("favorite/delete/\(releaseId)")
     }
 
+    // MARK: - Comments
+
+    /// Comments for a release. `sort`: 0=new, 1=old, 2=top.
+    func releaseComments(releaseId: Int64, page: Int, sort: Int = 2) async throws -> CommentsResponse {
+        try await get("release/comment/all/\(releaseId)/\(page)", query: [URLQueryItem(name: "sort", value: String(sort))])
+    }
+
+    // MARK: - Episode tracking
+
+    /// Mark a single episode as watched. Requires auth.
+    func markEpisodeWatched(releaseId: Int64, sourceId: Int, position: Int) async throws -> SimpleResponse {
+        try await get("episode/watch/\(releaseId)/\(sourceId)/\(position)")
+    }
+
+    /// Unmark an episode (removes from history).
+    func unmarkEpisodeWatched(releaseId: Int64, sourceId: Int, position: Int) async throws -> SimpleResponse {
+        try await get("episode/unwatch/\(releaseId)/\(sourceId)/\(position)")
+    }
+
+    // MARK: - History
+
+    func watchHistory(page: Int) async throws -> ReleasesResponse {
+        try await get("history/\(page)")
+    }
+
     // MARK: - Profile
 
     func profile(id: Int64) async throws -> Profile {

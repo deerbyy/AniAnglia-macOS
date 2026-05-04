@@ -21,6 +21,8 @@ struct ContentView: View {
                         SearchView()
                     case .bookmarks:
                         BookmarksView()
+                    case .history:
+                        HistoryView()
                     case .profile:
                         ProfileView()
                     }

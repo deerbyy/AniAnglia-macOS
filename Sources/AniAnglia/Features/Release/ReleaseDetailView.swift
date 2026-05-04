@@ -72,6 +72,8 @@ struct ReleaseDetailView: View {
                         screenshotsSection(urls: release.screenshots)
                     }
                     description(for: release)
+                    Divider().padding(.vertical, 8)
+                    CommentsView(releaseId: releaseId)
                 } else if vm.isLoading {
                     ProgressView().padding()
                 } else if let error = vm.errorMessage {
