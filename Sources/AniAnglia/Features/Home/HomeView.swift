@@ -54,9 +54,6 @@ struct HomeView: View {
             .padding(24)
         }
         .navigationTitle("Главная")
-        .navigationDestination(for: Release.self) { release in
-            ReleaseDetailView(releaseId: release.id, prefetched: release)
-        }
         .task { await vm.load(api: appState.api) }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

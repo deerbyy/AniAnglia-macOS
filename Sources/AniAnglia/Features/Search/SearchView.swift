@@ -51,9 +51,6 @@ struct SearchView: View {
             content
         }
         .navigationTitle("Поиск")
-        .navigationDestination(for: Release.self) { release in
-            ReleaseDetailView(releaseId: release.id, prefetched: release)
-        }
         .onAppear { searchFieldFocused = true }
     }
 

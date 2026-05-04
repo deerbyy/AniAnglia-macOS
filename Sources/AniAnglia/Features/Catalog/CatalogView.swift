@@ -89,9 +89,6 @@ struct CatalogView: View {
             content
         }
         .navigationTitle("Каталог")
-        .navigationDestination(for: Release.self) { release in
-            ReleaseDetailView(releaseId: release.id, prefetched: release)
-        }
         .task {
             if vm.releases.isEmpty {
                 await vm.reload(api: appState.api)

@@ -102,9 +102,6 @@ struct HistoryView: View {
                 .disabled(vm.isLoading)
             }
         }
-        .navigationDestination(for: Release.self) { release in
-            ReleaseDetailView(releaseId: release.id, prefetched: release)
-        }
         .task(id: appState.auth.profileId) {
             if appState.auth.isAuthenticated && vm.releases.isEmpty {
                 await vm.reload(api: appState.api)

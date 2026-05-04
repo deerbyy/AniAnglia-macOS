@@ -36,11 +36,20 @@ struct BookmarksView: View {
             content
         }
         .navigationTitle("Закладки")
-        .navigationDestination(for: Release.self) { release in
-            ReleaseDetailView(releaseId: release.id, prefetched: release)
-        }
         .task(id: vm.category) {
             await vm.load(api: appState.api)
+        }
+        .onAppear {
+            if let pending = appState.pendingBookmarkCategory {
+                vm.category = pending
+                appState.pendingBookmarkCategory = nil
+            }
+        }
+        .onChange(of: appState.pendingBookmarkCategory) { newValue in
+            if let pending = newValue {
+                vm.category = pending
+                appState.pendingBookmarkCategory = nil
+            }
         }
     }
 

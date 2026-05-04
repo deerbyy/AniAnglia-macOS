@@ -5,16 +5,32 @@ import Combine
 final class AppState: ObservableObject {
     let api: AnixartAPI
     let auth: AuthStore
-    @Published var selectedSidebar: SidebarItem? = .home
+    @Published var selectedSidebar: SidebarItem = .home
 
-    /// When set, force-pushes a release into the current navigation stack
-    /// (used by the "Random release" toolbar action).
+    /// When set, a release should be pushed onto the active navigation stack.
+    /// `ContentView` observes this and resets it to `nil` after pushing.
     @Published var pendingRelease: Release?
+
+    /// Pre-select bookmark category (1..5) the next time `BookmarksView` opens.
+    @Published var pendingBookmarkCategory: Int?
 
     init() {
         let auth = AuthStore()
         self.auth = auth
         self.api = AnixartAPI(auth: auth)
+    }
+
+    /// Switch to a sidebar item, optionally pre-selecting a bookmark category.
+    func selectSidebar(_ item: SidebarItem, bookmarkCategory: Int? = nil) {
+        if item == .bookmarks, let cat = bookmarkCategory {
+            pendingBookmarkCategory = cat
+        }
+        selectedSidebar = item
+    }
+
+    /// Push a release onto the current navigation stack.
+    func openRelease(_ release: Release) {
+        pendingRelease = release
     }
 }
 

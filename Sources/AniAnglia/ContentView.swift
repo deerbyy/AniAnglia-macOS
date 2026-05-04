@@ -12,7 +12,7 @@ struct ContentView: View {
         } detail: {
             NavigationStack(path: $navPath) {
                 Group {
-                    switch appState.selectedSidebar ?? .home {
+                    switch appState.selectedSidebar {
                     case .home:
                         HomeView()
                     case .catalog:
@@ -26,6 +26,9 @@ struct ContentView: View {
                     case .profile:
                         ProfileView()
                     }
+                }
+                .navigationDestination(for: Release.self) { release in
+                    ReleaseDetailView(releaseId: release.id, prefetched: release)
                 }
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
@@ -63,6 +66,11 @@ struct ContentView: View {
         .onChange(of: appState.selectedSidebar) { _ in
             navPath = NavigationPath()
         }
+        .onChange(of: appState.pendingRelease) { release in
+            guard let release else { return }
+            navPath.append(release)
+            appState.pendingRelease = nil
+        }
     }
 
     private func openRandomRelease() async {
@@ -76,17 +84,13 @@ struct ContentView: View {
 }
 
 private struct Sidebar: View {
-    @Binding var selection: SidebarItem?
+    @Binding var selection: SidebarItem
 
     var body: some View {
-        List(selection: $selection) {
-            Section("AniAnglia") {
-                ForEach(SidebarItem.allCases) { item in
-                    Label(item.title, systemImage: item.systemImage)
-                        .tag(Optional(item))
-                }
-            }
+        List(SidebarItem.allCases, id: \.self, selection: $selection) { item in
+            Label(item.title, systemImage: item.systemImage)
         }
         .listStyle(.sidebar)
+        .navigationTitle("AniAnglia")
     }
 }
