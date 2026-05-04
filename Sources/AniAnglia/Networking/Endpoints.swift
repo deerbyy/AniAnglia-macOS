@@ -128,6 +128,34 @@ extension AnixartAPI {
         try await get("release/comment/all/\(releaseId)/\(page)", query: [URLQueryItem(name: "sort", value: String(sort))])
     }
 
+    /// Post a new comment to a release. `parentCommentId` is for replies.
+    /// Spoiler flag marks the message as a hidden spoiler.
+    func addComment(releaseId: Int64, message: String, parentCommentId: Int64? = nil, isSpoiler: Bool = false) async throws -> SimpleResponse {
+        var body: [String: Any] = [
+            "message": message,
+            "is_spoiler": isSpoiler
+        ]
+        if let parentCommentId { body["parent_comment_id"] = parentCommentId }
+        return try await postJSON("release/comment/add/\(releaseId)", body: body)
+    }
+
+    /// Vote on a comment. value: 1 = like, -1 = dislike, 0 = remove vote.
+    func voteComment(commentId: Int64, value: Int) async throws -> SimpleResponse {
+        try await get("release/comment/vote/\(commentId)/\(value)")
+    }
+
+    // MARK: - Release rating
+
+    /// Rate a release with 1..5 stars.
+    func rateRelease(releaseId: Int64, stars: Int) async throws -> SimpleResponse {
+        try await get("release/vote/add/\(releaseId)/\(stars)")
+    }
+
+    /// Remove your rating from a release.
+    func unrateRelease(releaseId: Int64) async throws -> SimpleResponse {
+        try await get("release/vote/delete/\(releaseId)")
+    }
+
     // MARK: - Episode tracking
 
     /// Mark a single episode as watched. Requires auth.

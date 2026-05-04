@@ -21,6 +21,8 @@ struct Release: Codable, Identifiable, Hashable {
     let screenshotImageUrls: [String]?
     let isFavorite: Bool?
     let profileListStatus: Int?
+    let voteCount: Int?
+    let yourVote: Int?
 
     var displayTitle: String {
         titleRu ?? titleOriginal ?? titleAlt ?? "Без названия"

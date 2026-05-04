@@ -13,6 +13,8 @@ final class CatalogViewModel: ObservableObject {
     @Published var status: Int? = nil
     @Published var startYear: Int? = nil
     @Published var endYear: Int? = nil
+    @Published var genres: Set<String> = []
+    @Published var excludeGenres: Bool = false
 
     func reload(api: AnixartAPI) async {
         page = 0
@@ -31,7 +33,9 @@ final class CatalogViewModel: ObservableObject {
                 category: category,
                 status: status,
                 startYear: startYear,
-                endYear: endYear
+                endYear: endYear,
+                genres: Array(genres),
+                excludeGenres: excludeGenres
             )
             releases.append(contentsOf: resp.items)
             totalPages = resp.totalPageCount
@@ -75,10 +79,12 @@ struct CatalogView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            filtersBar
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
+            ScrollView(.horizontal, showsIndicators: false) {
+                filtersBar
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+            }
             Divider()
             content
         }
@@ -126,6 +132,8 @@ struct CatalogView: View {
             }
             .pickerStyle(.menu)
             .frame(maxWidth: 120)
+
+            GenresPickerButton(selected: $vm.genres, exclude: $vm.excludeGenres)
 
             Spacer()
 

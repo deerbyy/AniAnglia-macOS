@@ -9,6 +9,8 @@ final class ReleaseDetailViewModel: ObservableObject {
     @Published var bookmarkCategory: Int? = nil // 0 = none, 1..5 = list category
     @Published var bookmarkPending = false
     @Published var bookmarkError: String?
+    @Published var userVote: Int = 0 // 0 = none, 1..5 stars
+    @Published var votePending = false
 
     func load(api: AnixartAPI, releaseId: Int64) async {
         isLoading = true
@@ -23,12 +25,31 @@ final class ReleaseDetailViewModel: ObservableObject {
         if let loadedRelease {
             release = loadedRelease
             bookmarkCategory = loadedRelease.profileListStatus
+            userVote = loadedRelease.yourVote ?? 0
         }
         videoBlocks = loadedBlocks
         if release == nil && errorMessage == nil {
             errorMessage = "Не удалось загрузить релиз"
         }
         isLoading = false
+    }
+
+    func setRating(api: AnixartAPI, releaseId: Int64, stars: Int) async {
+        let previous = userVote
+        let next = stars == userVote ? 0 : stars
+        userVote = next
+        votePending = true
+        defer { votePending = false }
+        do {
+            if next == 0 {
+                _ = try await api.unrateRelease(releaseId: releaseId)
+            } else {
+                _ = try await api.rateRelease(releaseId: releaseId, stars: next)
+            }
+        } catch {
+            userVote = previous
+            bookmarkError = error.localizedDescription
+        }
     }
 
     func setBookmark(api: AnixartAPI, releaseId: Int64, category: Int?) async {
@@ -141,11 +162,44 @@ struct ReleaseDetailView: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
+                    if appState.auth.isAuthenticated {
+                        userRatingRow
+                    }
                     actionsRow
                 }
                 Spacer()
             }
             Spacer()
+        }
+    }
+
+    private var userRatingRow: some View {
+        HStack(spacing: 4) {
+            Text(vm.userVote == 0 ? "Оценить:" : "Твоя оценка:")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            ForEach(1...5, id: \.self) { star in
+                Button {
+                    Task { await vm.setRating(api: appState.api, releaseId: releaseId, stars: star) }
+                } label: {
+                    Image(systemName: star <= vm.userVote ? "star.fill" : "star")
+                        .font(.title3)
+                        .foregroundStyle(star <= vm.userVote ? Color.yellow : .secondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(vm.votePending)
+            }
+            if vm.userVote > 0 {
+                Button {
+                    Task { await vm.setRating(api: appState.api, releaseId: releaseId, stars: vm.userVote) }
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Убрать свою оценку")
+            }
         }
     }
 
