@@ -1,0 +1,77 @@
+name: Build DMG
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          ls /Applications | grep -i xcode || true
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build (Release, ad-hoc signed)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project AniAnglia.xcodeproj \
+            -scheme AniAnglia \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath build \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            ENABLE_HARDENED_RUNTIME=NO \
+            DEVELOPMENT_TEAM= \
+            build
+
+      - name: Locate .app
+        id: locate
+        run: |
+          APP_PATH=$(find build/Build/Products/Release -maxdepth 2 -name "AniAnglia.app" -type d | head -n1)
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "Found app at: $APP_PATH"
+          ls -la "$APP_PATH"
+
+      - name: Create DMG
+        run: |
+          set -e
+          APP_PATH="${{ steps.locate.outputs.APP_PATH }}"
+          STAGING=$(mktemp -d)
+          cp -R "$APP_PATH" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          mkdir -p artifacts
+          DMG_NAME="AniAnglia-macOS-$(date -u +%Y%m%d-%H%M%S)-devin.dmg"
+          hdiutil create \
+            -volname "AniAnglia" \
+            -srcfolder "$STAGING" \
+            -ov \
+            -format UDZO \
+            "artifacts/$DMG_NAME"
+          echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
+          ls -la artifacts/
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: AniAnglia-macOS-DMG
+          path: artifacts/*.dmg
+          if-no-files-found: error
+          retention-days: 30
