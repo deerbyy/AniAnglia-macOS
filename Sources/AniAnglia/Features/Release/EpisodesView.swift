@@ -250,7 +250,7 @@ private struct EpisodeRow: View {
                 HStack(spacing: 12) {
                     Image(systemName: "play.circle.fill")
                         .font(.title2)
-                        .foregroundStyle(.accentColor)
+                        .foregroundStyle(Color.accentColor)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(episode.name ?? "Серия \(episode.position + 1)")
                             .font(.body)
