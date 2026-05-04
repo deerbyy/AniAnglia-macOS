@@ -9,22 +9,22 @@ final class HomeViewModel: ObservableObject {
 
     func load(api: AnixartAPI) async {
         isLoading = true
-        defer { isLoading = false }
         do {
-            async let watchingResp = api.discoverWatching(page: 0)
-            self.watching = try await watchingResp.items
+            let watchingResp = try await api.discoverWatching(page: 0)
+            self.watching = watchingResp.items
             errorMessage = nil
-            // Personal recommendations only when authed.
-            if api.auth.isAuthenticated {
-                if let recs = try? await api.discoverRecommendations(page: 0).items {
-                    self.recommendations = recs
-                }
-            } else {
-                self.recommendations = []
-            }
         } catch {
             errorMessage = error.localizedDescription
         }
+        // Personal recommendations only when authed (don't fail the whole load if this fails).
+        if api.auth.isAuthenticated {
+            if let recs = try? await api.discoverRecommendations(page: 0).items {
+                self.recommendations = recs
+            }
+        } else {
+            self.recommendations = []
+        }
+        isLoading = false
     }
 }
 

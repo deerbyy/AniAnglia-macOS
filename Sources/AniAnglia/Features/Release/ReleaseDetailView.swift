@@ -12,16 +12,14 @@ final class ReleaseDetailViewModel: ObservableObject {
 
     func load(api: AnixartAPI, releaseId: Int64) async {
         isLoading = true
-        defer { isLoading = false }
-        async let releaseTask: Release? = {
+        let loadedRelease: Release? = await {
             do { return try await api.release(id: releaseId) }
             catch { return nil }
         }()
-        async let videosTask: [VideoBlock] = {
+        let loadedBlocks: [VideoBlock] = await {
             do { return try await api.videoBlocks(releaseId: releaseId).blocks }
             catch { return [] }
         }()
-        let (loadedRelease, loadedBlocks) = await (releaseTask, videosTask)
         if let loadedRelease {
             release = loadedRelease
             bookmarkCategory = loadedRelease.profileListStatus
@@ -30,6 +28,7 @@ final class ReleaseDetailViewModel: ObservableObject {
         if release == nil && errorMessage == nil {
             errorMessage = "Не удалось загрузить релиз"
         }
+        isLoading = false
     }
 
     func setBookmark(api: AnixartAPI, releaseId: Int64, category: Int?) async {

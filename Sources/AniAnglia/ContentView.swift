@@ -44,6 +44,9 @@ struct ContentView: View {
                         .help("Поиск")
                         .keyboardShortcut("k", modifiers: .command)
                     }
+                    ToolbarItem(placement: .primaryAction) {
+                        AccountToolbar(auth: appState.auth)
+                    }
                 }
             }
         }
