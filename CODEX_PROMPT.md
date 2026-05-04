@@ -81,7 +81,7 @@
 - `https://github.com/deerbyy/AniAnglia/tree/main/AniAnglia/Libraries/aateam/libanixart/include/anixart` — там лежат C++ заголовки с DTO и URL.
 - Или через `strings deerbyy/AniAnglia .../libanixart.a | grep '^/'`.
 
-## Что уже сделано (v0.5 — текущий статус)
+## Что уже сделано (v0.6 — текущий статус)
 
 **Скелет (v0.1):**
 - Каркас: SwiftUI, NavigationSplitView, сайдбар.
@@ -111,6 +111,10 @@
 - **Мультиселект жанров (v0.5)**: `Features/Catalog/GenresPickerButton.swift` — popover с чекбоксами на 45 жанров из `Models/AnixartGenres.swift` (извлечены из iOS-источника `LibanixartApi.mm`). Переключатель «Исключить выбранные» (`is_genres_exclude_mode`).
 - **Отправка комментариев + лайки (v0.5)**: композер в `CommentsView` с TextEditor и спойлер-флагом. Под каждым комментарием — кнопки thumbs up/down (`/release/comment/vote/{id}/{value}`).
 - **Оценка релиза звёздами (v0.5)**: 5 звёзд на `ReleaseDetailView` (только для авторизованных). Тап по той же звезде убирает оценку. `Release.yourVote` добавлен в модель.
+- **Фикс сайдбара (v0.6)**: в предыдущей версии кнопки сайдбара не отвечали из-за `Section` + Optional binding. Теперь `List(SidebarItem.allCases, id: \.self, selection: $selection)` — это стабильный паттерн на macOS. **НЕ** используй `.tag(Optional(item))` + `Section` — съедает тапы.
+- **Полный экран Профиля (v0.6)**: аватар + логин + статус + дата регистрации + кнопки Обновить/Выйти. Сетка статистики кликабельна. Дальше 5 секций-превью (по всем категориям закладок) — горизонтальный скролл с до 8 карточками плюс кнопка «Все →» переходит на вкладку Закладки с нужной категорией.
+- **Централизованный navigationDestination (v0.6)**: `navigationDestination(for: Release.self)` вынесен на коронь NavigationStack в ContentView — из любого вложенного экрана (в т.ч. из Профиля) можно писать `NavigationLink(value: release)`. Дублирующие `navigationDestination(for: Release.self)` из дочерних вью удалены.
+- **AppState.selectSidebar / openRelease (v0.6)**: новые helpers для навигации между вкладками с опциями (например «открыть Закладки с категорией 'Brosheno'»).
 
 ## Что НЕ сделано (TODO)
 - [ ] Ответы на комментарии (`/release/comment/replies/{id}/{page}`) + редактирование/удаление своих.
