@@ -46,6 +46,10 @@
 | GET | `/profile/list/delete/0/{releaseId}` | Убрать из закладок |
 | GET | `/profile/{id}` | Профиль пользователя |
 | POST | `/auth/signIn` | Авторизация (form: login, password) |
+| GET | `/release/comment/all/{releaseId}/{page}?sort=N` | Комменты (sort: 0=новые, 1=старые, 2=топ) |
+| GET | `/episode/watch/{releaseId}/{sourceId}/{position}` | Отметить серию просмотренной |
+| GET | `/episode/unwatch/{releaseId}/{sourceId}/{position}` | Снять отметку просмотра |
+| GET | `/history/{page}` | История просмотров (требует авторизацию) |
 
 #### `/filter/{page}` JSON-боди (поля опциональные):
 ```json
@@ -62,15 +66,16 @@
 ```
 
 ### Эндпоинты, которые ещё не подключены, но точно есть
-- `/release/comment/all/{releaseId}/{page}` — комменты к релизу
-- `/episode/watch/{releaseId}/{sourceId}/{position}` (POST) — пометить серию просмотренной
+- `/release/comment/add/{releaseId}` (POST) — оставить комментарий
+- `/release/comment/vote/{commentId}/{value}` — лайк/дизлайк комментария
 - `/profile/preference/{type}` — настройки уведомлений профиля
+- `/notification/all/{page}` — уведомления
 
 Для полного списка (~150 эндпоинтов) можно посмотреть iOS-исходник:
 - `https://github.com/deerbyy/AniAnglia/tree/main/AniAnglia/Libraries/aateam/libanixart/include/anixart` — там лежат C++ заголовки с DTO и URL.
 - Или через `strings deerbyy/AniAnglia .../libanixart.a | grep '^/'`.
 
-## Что уже сделано (v0.2 — текущий статус)
+## Что уже сделано (v0.4 — текущий статус)
 
 **Скелет (v0.1):**
 - Каркас: SwiftUI, NavigationSplitView, сайдбар.
@@ -91,13 +96,17 @@
 - **Профиль**: статистика + login form.
 - **Настройки** (`Cmd+,`): Основные (НОВОЕ: «Очистить кэш» работает — `RemoteImageCache.shared.clear()`), Воспроизведение, О программе.
 - **Тулбар** (НОВОЕ): `⚡️ Случайный релиз` (Cmd+Shift+R) и `🔎 Поиск` (Cmd+K — фокус на вкладку с поиском).
-- **Иконка** (НОВОЕ): своя иконка (пурпурный градиент + play-треугольник + «A»), все размеры 16—1024 в `Resources/Assets.xcassets/AppIcon.appiconset`.
+- **Иконка** (v0.2): своя иконка (пурпурный градиент + play-треугольник + «A»), все размеры 16—1024 в `Resources/Assets.xcassets/AppIcon.appiconset`.
+- **Исправление краша Swift Concurrency (v0.3)**: `async let` + `defer` вызывал фатальный `swift_task_dealloc → asyncLet_finish_after_task_completion`. Рефактор на простой последовательный `try await` в `HomeView.load()` и `ReleaseDetailView.load()`. **НИКОГДА** не используй `async let` вместе с `defer` в @MainActor контексте.
+- **Глобальный вход (v0.3)**: `Features/Account/AccountToolbar.swift` — кнопка в тулбаре справа. Когда не вошёл — «Войти» вызывает sheet `LoginSheet`. Когда вошёл — показывает аватар + логин с меню «Открыть профиль / Выйти». Читаемые ошибки логина (code 2/3/4/5).
+- **Комментарии (v0.4)**: `Features/Release/CommentsView.swift` встроен в `ReleaseDetailView`. Сортировка топ/новые/старые, ленивая пагинация, раскрытие спойлеров.
+- **История просмотров (v0.4)**: новый таб в сайдбаре (`SidebarItem.history`), `Features/History/HistoryView.swift`. Требует авторизацию (`/history/{page}`).
+- **Отметка серии просмотренной (v0.4)**: кнопка-галочка в `EpisodeRow`. Оптимистичный апдейт с откатом при ошибке. Авто-пометка при закрытии плеера.
 
 ## Что НЕ сделано (TODO)
-- [ ] Комментарии и ответы к релизу (`/release/comment/all/...`)
-- [ ] Отметка серии как просмотренной из UI (эндпоинт `/episode/watch/...` еще не подключен)
-- [ ] История просмотров отдельным экраном
+- [ ] Отправка своих комментариев и ответы (`/release/comment/add/...`, `/release/comment/vote/...`)
 - [ ] Навигация по жанрам в Каталоге (сейчас `genres` не выведен в UI — нужен мультиселект с известными жанрами)
+- [ ] Уведомления (`/notification/all/{page}`)
 - [ ] Настоящая подпись + нотарификация для распространения вне Gatekeeper. Сейчас ad-hoc подпись (`-`), Gatekeeper при первом запуске ругается, но через ПКМ → Открыть запускается.
 - [ ] Авто-пагинация в закладках/поиске (сейчас всегда page=0).
 
