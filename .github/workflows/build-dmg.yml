@@ -2,7 +2,7 @@ name: Build DMG
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, "devin/**" ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
