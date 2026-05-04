@@ -25,7 +25,7 @@ final class AnixartAPI {
 
     private let session: URLSession
     private let decoder: JSONDecoder
-    private let auth: AuthStore
+    let auth: AuthStore
 
     init(auth: AuthStore) {
         let config = URLSessionConfiguration.default
@@ -74,6 +74,23 @@ final class AnixartAPI {
             "\(urlEncode(k))=\(urlEncode(v))"
         }.joined(separator: "&")
         req.httpBody = body.data(using: .utf8)
+        return try await perform(req)
+    }
+
+    /// POST a JSON-encoded payload (for /filter/{page}, etc).
+    func postJSON<T: Decodable>(_ path: String, body: [String: Any], as type: T.Type = T.self) async throws -> T {
+        var components = URLComponents(url: Self.baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
+        var items: [URLQueryItem] = []
+        if let token = auth.token, let pid = auth.profileId {
+            items.append(URLQueryItem(name: "token", value: token))
+            items.append(URLQueryItem(name: "profile_id", value: String(pid)))
+        }
+        if !items.isEmpty { components.queryItems = items }
+        guard let url = components.url else { throw APIError.empty }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
         return try await perform(req)
     }
 

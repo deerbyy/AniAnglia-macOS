@@ -18,11 +18,25 @@ struct SettingsView: View {
         .padding()
     }
 
+    @State private var cacheCleared = false
+
     private var generalTab: some View {
         Form {
             Section("Кэш") {
-                Button("Очистить кэш изображений") {
-                    // TODO: hook into RemoteImageCache.shared
+                HStack {
+                    Button("Очистить кэш изображений") {
+                        RemoteImageCache.shared.clear()
+                        cacheCleared = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            cacheCleared = false
+                        }
+                    }
+                    if cacheCleared {
+                        Text("Очищено")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .transition(.opacity)
+                    }
                 }
             }
             Section("Внешний вид") {

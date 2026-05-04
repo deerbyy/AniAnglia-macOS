@@ -20,11 +20,6 @@ struct Video: Codable, Identifiable, Hashable {
     let playerUrl: String?
     let hosting: VideoHosting?
 
-    enum CodingKeys: String, CodingKey {
-        case id, title, image, url, hosting
-        case playerUrl = "player_url"
-    }
-
     var thumbnailURL: URL? {
         image.flatMap { URL(string: $0) }
     }

@@ -31,7 +31,7 @@ final class SearchViewModel: ObservableObject {
         defer { isLoading = false }
         do {
             let resp = try await api.searchReleases(query: trimmed, page: 0)
-            results = resp.releases
+            results = resp.items
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -42,6 +42,7 @@ final class SearchViewModel: ObservableObject {
 struct SearchView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm = SearchViewModel()
+    @FocusState private var searchFieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,6 +54,7 @@ struct SearchView: View {
         .navigationDestination(for: Release.self) { release in
             ReleaseDetailView(releaseId: release.id, prefetched: release)
         }
+        .onAppear { searchFieldFocused = true }
     }
 
     private var searchField: some View {
@@ -62,6 +64,7 @@ struct SearchView: View {
             TextField("Название, студия, автор…", text: $vm.query)
                 .textFieldStyle(.plain)
                 .font(.title3)
+                .focused($searchFieldFocused)
                 .onChange(of: vm.query) { _ in
                     vm.searchAfterDelay(api: appState.api)
                 }

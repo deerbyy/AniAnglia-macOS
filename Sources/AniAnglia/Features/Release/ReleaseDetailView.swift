@@ -6,6 +6,9 @@ final class ReleaseDetailViewModel: ObservableObject {
     @Published var videoBlocks: [VideoBlock] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
+    @Published var bookmarkCategory: Int? = nil // 0 = none, 1..5 = list category
+    @Published var bookmarkPending = false
+    @Published var bookmarkError: String?
 
     func load(api: AnixartAPI, releaseId: Int64) async {
         isLoading = true
@@ -21,10 +24,28 @@ final class ReleaseDetailViewModel: ObservableObject {
         let (loadedRelease, loadedBlocks) = await (releaseTask, videosTask)
         if let loadedRelease {
             release = loadedRelease
+            bookmarkCategory = loadedRelease.profileListStatus
         }
         videoBlocks = loadedBlocks
         if release == nil && errorMessage == nil {
             errorMessage = "Не удалось загрузить релиз"
+        }
+    }
+
+    func setBookmark(api: AnixartAPI, releaseId: Int64, category: Int?) async {
+        bookmarkPending = true
+        defer { bookmarkPending = false }
+        do {
+            if let category {
+                _ = try await api.addToList(releaseId: releaseId, category: category)
+                bookmarkCategory = category
+            } else {
+                _ = try await api.removeFromList(releaseId: releaseId)
+                bookmarkCategory = nil
+            }
+            bookmarkError = nil
+        } catch {
+            bookmarkError = error.localizedDescription
         }
     }
 }
@@ -74,6 +95,14 @@ struct ReleaseDetailView: View {
                 }
             }
         }
+        .alert("Не удалось", isPresented: Binding(
+            get: { vm.bookmarkError != nil },
+            set: { if !$0 { vm.bookmarkError = nil } }
+        ), actions: {
+            Button("OK") { vm.bookmarkError = nil }
+        }, message: {
+            Text(vm.bookmarkError ?? "")
+        })
     }
 
     private var effectiveRelease: Release? {
@@ -111,11 +140,70 @@ struct ReleaseDetailView: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
+                    actionsRow
                 }
                 Spacer()
             }
             Spacer()
         }
+    }
+
+    private var actionsRow: some View {
+        HStack(spacing: 10) {
+            NavigationLink {
+                EpisodesView(releaseId: releaseId, releaseTitle: effectiveRelease?.displayTitle)
+            } label: {
+                Label("Смотреть", systemImage: "play.fill")
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+            }
+            .buttonStyle(.borderedProminent)
+
+            bookmarkMenu
+        }
+        .padding(.top, 8)
+    }
+
+    private var bookmarkMenu: some View {
+        let cats: [(Int, String, Color)] = [
+            (1, "В планах", .yellow),
+            (2, "Смотрю", .indigo),
+            (3, "Просмотрено", .green),
+            (4, "Отложено", .purple),
+            (5, "Брошено", .red)
+        ]
+        let current = vm.bookmarkCategory
+        let currentLabel = cats.first(where: { $0.0 == current })
+        return Menu {
+            ForEach(cats, id: \.0) { (id, name, _) in
+                Button {
+                    Task { await vm.setBookmark(api: appState.api, releaseId: releaseId, category: id) }
+                } label: {
+                    if current == id {
+                        Label(name, systemImage: "checkmark")
+                    } else {
+                        Text(name)
+                    }
+                }
+            }
+            if current != nil {
+                Divider()
+                Button(role: .destructive) {
+                    Task { await vm.setBookmark(api: appState.api, releaseId: releaseId, category: nil) }
+                } label: {
+                    Label("Убрать из списка", systemImage: "bookmark.slash")
+                }
+            }
+        } label: {
+            Label(currentLabel?.1 ?? "В закладки",
+                  systemImage: currentLabel == nil ? "bookmark" : "bookmark.fill")
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .foregroundStyle(currentLabel?.2 ?? .accentColor)
+        }
+        .fixedSize()
+        .disabled(vm.bookmarkPending || !appState.auth.isAuthenticated)
+        .help(appState.auth.isAuthenticated ? "Списки отслеживания" : "Войди в аккаунт во вкладке «Профиль», чтобы добавлять в закладки")
     }
 
     private func info(for release: Release) -> some View {

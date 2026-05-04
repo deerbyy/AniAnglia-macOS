@@ -44,13 +44,16 @@ struct ReleasesResponse: Codable, CodedResponse {
     let code: Int
     let message: String?
     let releases: [Release]
+    let content: [Release]
     let totalCount: Int?
     let totalPageCount: Int?
+    let currentPage: Int?
+
+    /// Catalog/filter responses use `content`, search uses `releases`.
+    var items: [Release] { releases.isEmpty ? content : releases }
 
     enum CodingKeys: String, CodingKey {
-        case code, message, releases
-        case totalCount = "total_count"
-        case totalPageCount = "total_page_count"
+        case code, message, releases, content, totalCount, totalPageCount, currentPage
     }
 
     init(from decoder: Decoder) throws {
@@ -58,8 +61,10 @@ struct ReleasesResponse: Codable, CodedResponse {
         self.code = (try? c.decode(Int.self, forKey: .code)) ?? 0
         self.message = try? c.decode(String.self, forKey: .message)
         self.releases = (try? c.decode([Release].self, forKey: .releases)) ?? []
+        self.content = (try? c.decode([Release].self, forKey: .content)) ?? []
         self.totalCount = try? c.decode(Int.self, forKey: .totalCount)
         self.totalPageCount = try? c.decode(Int.self, forKey: .totalPageCount)
+        self.currentPage = try? c.decode(Int.self, forKey: .currentPage)
     }
 }
 

@@ -31,53 +31,75 @@
 
 | Метод | Путь | Назначение |
 |-------|------|-----------|
-| GET | `/discover` | Лента «Интересное» |
+| GET | `/discover/watching/{page}` | Лента «Сейчас смотрят» |
+| GET | `/discover/recommendations/{page}` | Персональные рекомендации |
 | GET | `/release/{id}` | Один релиз |
 | GET | `/release/random` | Случайный релиз |
-| GET | `/video/release/{id}` | Видео-блоки релиза (трейлеры/опенинги/эндинги) |
+| GET | `/video/release/{id}` | Видео-блоки релиза |
 | POST | `/search/releases/{page}` | Поиск (form: query, searchBy=0) |
-| GET | `/favorite/all/{page}?category=N` | Закладки (1=Planned, 2=Watching, 3=Watched, 4=OnHold, 5=Dropped) |
+| POST | `/filter/{page}` | Каталог с фильтрами (JSON боди) |
+| GET | `/episode/{releaseId}` | Список озвучек (`types`) |
+| GET | `/episode/{releaseId}/{typeId}` | Список плееров (`sources`) |
+| GET | `/episode/{releaseId}/{typeId}/{sourceId}` | Список серий |
+| GET | `/profile/list/all/{profileId}/{cat}/{page}` | Закладки по категории (1–5) |
+| GET | `/profile/list/add/{cat}/{releaseId}` | Добавить в категорию |
+| GET | `/profile/list/delete/0/{releaseId}` | Убрать из закладок |
 | GET | `/profile/{id}` | Профиль пользователя |
 | POST | `/auth/signIn` | Авторизация (form: login, password) |
 
+#### `/filter/{page}` JSON-боди (поля опциональные):
+```json
+{
+  "sort": 3,                  // 0=обновлению, 1=оценка, 2=год, 3=популярность
+  "category": 1,              // 1=сериал, 2=фильм, 3=OVA, 4=ONA, 5=спешл
+  "status": 1,                // 1=вышел, 2=анонс, 3=онгоинг
+  "start_year": 2015,
+  "end_year": 2024,
+  "country": "Япония",
+  "genres": ["экшн", "фэнтези"],
+  "is_genres_exclude_mode": false
+}
+```
+
 ### Эндпоинты, которые ещё не подключены, но точно есть
-- `/episode/{releaseId}/{sourceId}` — список серий
-- `/episode/url/{releaseId}/{sourceId}/{episodeId}` — URL плеера эпизода
-- `/release/comment/all/{releaseId}/{page}` — комменты
-- `/filter/{page}` (POST с фильтрами по жанрам/году/студии/etc.) — каталог с фильтрами
-- `/profile/list/edit/{releaseId}/{listId}` (POST) — добавить/убрать из закладок
+- `/release/comment/all/{releaseId}/{page}` — комменты к релизу
+- `/episode/watch/{releaseId}/{sourceId}/{position}` (POST) — пометить серию просмотренной
 - `/profile/preference/{type}` — настройки уведомлений профиля
 
 Для полного списка (~150 эндпоинтов) можно посмотреть iOS-исходник:
 - `https://github.com/deerbyy/AniAnglia/tree/main/AniAnglia/Libraries/aateam/libanixart/include/anixart` — там лежат C++ заголовки с DTO и URL.
 - Или через `strings deerbyy/AniAnglia .../libanixart.a | grep '^/'`.
 
-## Что уже сделано (v0.1)
-- Каркас приложения: SwiftUI, NavigationSplitView, сайдбар.
-- API-клиент `AnixartAPI` (`Sources/AniAnglia/Networking/`).
-- Модели: `Release`, `Video`, `Profile` (Codable, snake_case → camelCase).
+## Что уже сделано (v0.2 — текущий статус)
+
+**Скелет (v0.1):**
+- Каркас: SwiftUI, NavigationSplitView, сайдбар.
+- API-клиент `AnixartAPI` (`Sources/AniAnglia/Networking/`), публичный `auth: AuthStore`, методы `get/post/postJSON`.
+- Модели: `Release`, `Video`, `Profile`, `Episode/EpisodeType/EpisodeSource` (Codable, snake_case → camelCase via `.convertFromSnakeCase`).
+- **НЕ добавляй** явные `CodingKey` override для snake_case-полей — стратегия работает против вас (вызывает двойное переименование).
 - AuthStore с Keychain.
-- Главная (лента «Интересное» из `/discover`).
-- Поиск (debounced, использует `/search/releases/0`).
-- Экран релиза: постер, метаданные, описание, видео-блоки, кадры.
-- Полноэкранный просмотрщик скриншотов с навигацией ←/→.
-- Видео-плеер через WKWebView (фолбэк http→https в URL).
-- Закладки (5 категорий, требует авторизацию).
-- Профиль + статистика + login form.
-- Настройки (3 вкладки: Основные, Воспроизведение, О программе) через `Settings { ... }` сцену (открывается по `Cmd+,`).
-- CI workflow (`.github/workflows/build-dmg.yml`): macos-14 → xcodegen → xcodebuild Release → hdiutil → `.dmg` артефакт.
+- CI workflow (`.github/workflows/build-dmg.yml`): **macos-15** (Xcode 16) → xcodegen → xcodebuild Release → hdiutil → `.dmg`.
+
+**Экраны:**
+- **Главная**: «Сейчас смотрят» (`/discover/watching/0`) + «Рекомендации» (если авторизован).
+- **Каталог** (НОВОЕ): `CatalogView` с фильтрами сортировки/категории/статуса/года. Пагинация через «Показать ещё». POST `/filter/{page}`.
+- **Поиск**: debounced, фокус на TextField автоматически (`@FocusState`).
+- **Релиз**: постер + метаданные + видео-блоки + кадры. НОВОЕ: кнопки «Смотреть» и выпадающее меню закладок (5 категорий + «Убрать»).
+- **Серии** (НОВОЕ): `EpisodesView` — пикер озвучек (`types`), пикер плееров (`sources`), список серий с бейджами «просмотрено». Плеер в sheet через WKWebView, http→https rewrite, схема-лесс URL `//...` обрабатывается.
+- **Скриншоты**: полноэкранный просмотрщик с навигацией ←/→.
+- **Закладки**: список по категориям (1–5), из экрана релиза добавляем/убираем.
+- **Профиль**: статистика + login form.
+- **Настройки** (`Cmd+,`): Основные (НОВОЕ: «Очистить кэш» работает — `RemoteImageCache.shared.clear()`), Воспроизведение, О программе.
+- **Тулбар** (НОВОЕ): `⚡️ Случайный релиз` (Cmd+Shift+R) и `🔎 Поиск` (Cmd+K — фокус на вкладку с поиском).
+- **Иконка** (НОВОЕ): своя иконка (пурпурный градиент + play-треугольник + «A»), все размеры 16—1024 в `Resources/Assets.xcassets/AppIcon.appiconset`.
 
 ## Что НЕ сделано (TODO)
-- [ ] Просмотр серий с конкретного озвучателя (нужны эндпоинты `/episode/...`)
-- [ ] Каталог с фильтрами (`/filter/{page}`)
-- [ ] Комментарии и ответы (`/release/comment/...`)
-- [ ] Добавление/удаление из закладок (`/profile/list/edit/...`)
-- [ ] История просмотров
-- [ ] Уведомления (push нет — но in-app можно показывать новости)
-- [ ] Кнопка «Случайный релиз» (`/release/random` подключен, но не вызывается из UI)
-- [ ] Настоящая иконка приложения (сейчас в AppIcon.appiconset нет PNG-файлов, иконки нет)
-- [ ] Очистка кеша картинок (кнопка в настройках есть, метод не подключен — `RemoteImageCache.shared` имеет `cache: NSCache`, добавь `func clear()`)
-- [ ] Правильная подпись + нотарификация для распространения вне Gatekeeper. Сейчас ad-hoc подпись (`-`), Gatekeeper при первом запуске ругается, но через ПКМ → Открыть запускается.
+- [ ] Комментарии и ответы к релизу (`/release/comment/all/...`)
+- [ ] Отметка серии как просмотренной из UI (эндпоинт `/episode/watch/...` еще не подключен)
+- [ ] История просмотров отдельным экраном
+- [ ] Навигация по жанрам в Каталоге (сейчас `genres` не выведен в UI — нужен мультиселект с известными жанрами)
+- [ ] Настоящая подпись + нотарификация для распространения вне Gatekeeper. Сейчас ad-hoc подпись (`-`), Gatekeeper при первом запуске ругается, но через ПКМ → Открыть запускается.
+- [ ] Авто-пагинация в закладках/поиске (сейчас всегда page=0).
 
 ## Как продолжать работу
 1. Клонируй: `git clone https://github.com/deerbyy/AniAnglia-macOS.git`

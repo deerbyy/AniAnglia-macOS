@@ -31,6 +31,11 @@ final class RemoteImageCache {
             return nil
         }
     }
+
+    func clear() {
+        cache.removeAllObjects()
+        URLCache.shared.removeAllCachedResponses()
+    }
 }
 
 struct RemoteImage<Placeholder: View>: View {

@@ -2,7 +2,8 @@ import SwiftUI
 
 @MainActor
 final class HomeViewModel: ObservableObject {
-    @Published var interesting: [Release] = []
+    @Published var watching: [Release] = []
+    @Published var recommendations: [Release] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
 
@@ -10,8 +11,17 @@ final class HomeViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            interesting = try await api.discoverInteresting()
+            async let watchingResp = api.discoverWatching(page: 0)
+            self.watching = try await watchingResp.items
             errorMessage = nil
+            // Personal recommendations only when authed.
+            if api.auth.isAuthenticated {
+                if let recs = try? await api.discoverRecommendations(page: 0).items {
+                    self.recommendations = recs
+                }
+            } else {
+                self.recommendations = []
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -26,16 +36,19 @@ struct HomeView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 header
-                if vm.isLoading && vm.interesting.isEmpty {
+                if vm.isLoading && vm.watching.isEmpty {
                     ProgressView("Загрузка…")
                         .padding(.vertical, 40)
                         .frame(maxWidth: .infinity)
-                } else if let error = vm.errorMessage, vm.interesting.isEmpty {
+                } else if let error = vm.errorMessage, vm.watching.isEmpty {
                     ErrorState(message: error) {
                         Task { await vm.load(api: appState.api) }
                     }
                 } else {
-                    section(title: "Интересное", releases: vm.interesting)
+                    if !vm.recommendations.isEmpty {
+                        section(title: "Рекомендации", releases: vm.recommendations)
+                    }
+                    section(title: "Сейчас смотрят", releases: vm.watching)
                 }
             }
             .padding(24)

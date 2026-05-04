@@ -12,7 +12,7 @@ final class BookmarksViewModel: ObservableObject {
         defer { isLoading = false }
         do {
             let resp = try await api.bookmarks(category: category, page: 0)
-            releases = resp.releases
+            releases = resp.items
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
