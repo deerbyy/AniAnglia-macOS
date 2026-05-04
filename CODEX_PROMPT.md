@@ -50,6 +50,10 @@
 | GET | `/episode/watch/{releaseId}/{sourceId}/{position}` | Отметить серию просмотренной |
 | GET | `/episode/unwatch/{releaseId}/{sourceId}/{position}` | Снять отметку просмотра |
 | GET | `/history/{page}` | История просмотров (требует авторизацию) |
+| POST | `/release/comment/add/{releaseId}` | Добавить комментарий (JSON: message, is_spoiler, parent_comment_id) |
+| GET | `/release/comment/vote/{commentId}/{value}` | Лайк/дизлайк/снять (value: 1, -1, 0) |
+| GET | `/release/vote/add/{releaseId}/{stars}` | Оценить релиз (1–5) |
+| GET | `/release/vote/delete/{releaseId}` | Убрать оценку |
 
 #### `/filter/{page}` JSON-боди (поля опциональные):
 ```json
@@ -66,16 +70,18 @@
 ```
 
 ### Эндпоинты, которые ещё не подключены, но точно есть
-- `/release/comment/add/{releaseId}` (POST) — оставить комментарий
-- `/release/comment/vote/{commentId}/{value}` — лайк/дизлайк комментария
+- `/release/comment/replies/{parentId}/{page}` — ответы на комментарий
+- `/release/comment/edit/{commentId}` (POST) — редактирование своего комментария
+- `/release/comment/delete/{commentId}` — удаление своего
+- `/profile/friend/all/{profileId}/{page}`, `/profile/friend/request/...` — друзья
 - `/profile/preference/{type}` — настройки уведомлений профиля
-- `/notification/all/{page}` — уведомления
+- Примечание: API Anixart **не имеет** эндпоинта `/notification/all` — уведомления реализованы только через пуш-уведомления.
 
 Для полного списка (~150 эндпоинтов) можно посмотреть iOS-исходник:
 - `https://github.com/deerbyy/AniAnglia/tree/main/AniAnglia/Libraries/aateam/libanixart/include/anixart` — там лежат C++ заголовки с DTO и URL.
 - Или через `strings deerbyy/AniAnglia .../libanixart.a | grep '^/'`.
 
-## Что уже сделано (v0.4 — текущий статус)
+## Что уже сделано (v0.5 — текущий статус)
 
 **Скелет (v0.1):**
 - Каркас: SwiftUI, NavigationSplitView, сайдбар.
@@ -102,13 +108,17 @@
 - **Комментарии (v0.4)**: `Features/Release/CommentsView.swift` встроен в `ReleaseDetailView`. Сортировка топ/новые/старые, ленивая пагинация, раскрытие спойлеров.
 - **История просмотров (v0.4)**: новый таб в сайдбаре (`SidebarItem.history`), `Features/History/HistoryView.swift`. Требует авторизацию (`/history/{page}`).
 - **Отметка серии просмотренной (v0.4)**: кнопка-галочка в `EpisodeRow`. Оптимистичный апдейт с откатом при ошибке. Авто-пометка при закрытии плеера.
+- **Мультиселект жанров (v0.5)**: `Features/Catalog/GenresPickerButton.swift` — popover с чекбоксами на 45 жанров из `Models/AnixartGenres.swift` (извлечены из iOS-источника `LibanixartApi.mm`). Переключатель «Исключить выбранные» (`is_genres_exclude_mode`).
+- **Отправка комментариев + лайки (v0.5)**: композер в `CommentsView` с TextEditor и спойлер-флагом. Под каждым комментарием — кнопки thumbs up/down (`/release/comment/vote/{id}/{value}`).
+- **Оценка релиза звёздами (v0.5)**: 5 звёзд на `ReleaseDetailView` (только для авторизованных). Тап по той же звезде убирает оценку. `Release.yourVote` добавлен в модель.
 
 ## Что НЕ сделано (TODO)
-- [ ] Отправка своих комментариев и ответы (`/release/comment/add/...`, `/release/comment/vote/...`)
-- [ ] Навигация по жанрам в Каталоге (сейчас `genres` не выведен в UI — нужен мультиселект с известными жанрами)
-- [ ] Уведомления (`/notification/all/{page}`)
-- [ ] Настоящая подпись + нотарификация для распространения вне Gatekeeper. Сейчас ad-hoc подпись (`-`), Gatekeeper при первом запуске ругается, но через ПКМ → Открыть запускается.
+- [ ] Ответы на комментарии (`/release/comment/replies/{id}/{page}`) + редактирование/удаление своих.
+- [ ] Друзья и заявки (`/profile/friend/all/...`).
+- [ ] Настройки профиля (изменение логина/пароля, аватара).
 - [ ] Авто-пагинация в закладках/поиске (сейчас всегда page=0).
+- [ ] Настоящая подпись + нотарификация для распространения вне Gatekeeper.
+- [ ] Поиск в истории/закладках.
 
 ## Как продолжать работу
 1. Клонируй: `git clone https://github.com/deerbyy/AniAnglia-macOS.git`
