@@ -9,6 +9,8 @@ final class ReleaseDetailViewModel: ObservableObject {
     @Published var bookmarkCategory: Int? = nil // 0 = none, 1..5 = list category
     @Published var bookmarkPending = false
     @Published var bookmarkError: String?
+    @Published var isFavorite = false
+    @Published var favoritePending = false
     @Published var userVote: Int = 0 // 0 = none, 1..5 stars
     @Published var votePending = false
 
@@ -25,6 +27,7 @@ final class ReleaseDetailViewModel: ObservableObject {
         if let loadedRelease {
             release = loadedRelease
             bookmarkCategory = loadedRelease.profileListStatus
+            isFavorite = loadedRelease.isFavorite ?? false
             userVote = loadedRelease.yourVote ?? 0
         }
         videoBlocks = loadedBlocks
@@ -59,6 +62,19 @@ final class ReleaseDetailViewModel: ObservableObject {
             try await syncStore.setStatus(api: api, release: release, category: category)
             bookmarkCategory = category?.rawValue
             self.release = release.withProfileListStatus(category?.rawValue)
+            bookmarkError = nil
+        } catch {
+            bookmarkError = error.localizedDescription
+        }
+    }
+
+    func setFavorite(api: AnixartAPI, syncStore: BookmarkSyncStore, release: Release, isFavorite: Bool) async {
+        favoritePending = true
+        defer { favoritePending = false }
+        do {
+            try await syncStore.setFavorite(api: api, release: release, isFavorite: isFavorite)
+            self.isFavorite = isFavorite
+            self.release = release.withFavorite(isFavorite)
             bookmarkError = nil
         } catch {
             bookmarkError = error.localizedDescription
@@ -211,8 +227,34 @@ struct ReleaseDetailView: View {
             .buttonStyle(.borderedProminent)
 
             bookmarkMenu
+            favoriteButton
         }
         .padding(.top, 8)
+    }
+
+    private var favoriteButton: some View {
+        Button {
+            if let release = effectiveRelease {
+                Task {
+                    await vm.setFavorite(
+                        api: appState.api,
+                        syncStore: appState.bookmarkSync,
+                        release: release,
+                        isFavorite: !vm.isFavorite
+                    )
+                }
+            }
+        } label: {
+            Label(vm.isFavorite ? "В избранном" : "В избранное",
+                  systemImage: vm.isFavorite ? "star.fill" : "star")
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+        }
+        .buttonStyle(.bordered)
+        .foregroundStyle(vm.isFavorite ? .yellow : .accentColor)
+        .fixedSize()
+        .disabled(vm.favoritePending || !appState.auth.isAuthenticated)
+        .help(appState.auth.isAuthenticated ? "Синхронизировать избранное Anixart" : "Войди в аккаунт во вкладке «Профиль», чтобы добавлять в избранное")
     }
 
     private var bookmarkMenu: some View {

@@ -92,7 +92,7 @@ extension AnixartAPI {
     // MARK: - Bookmarks / Profile lists
 
     /// Список релизов в категории закладок (для текущего пользователя).
-    /// Категория: 1=Запланировано, 2=Смотрю, 3=Просмотрено, 4=Отложено, 5=Брошено
+    /// Категория как в libanixart `Profile::ListStatus`: 1=Смотрю, 2=В планах, 3=Просмотрено, 4=Отложено, 5=Брошено.
     func bookmarks(category: Int, page: Int = 0) async throws -> ReleasesResponse {
         guard let pid = auth.profileId else { throw APIError.server(code: 401, message: "Не авторизован") }
         return try await get("profile/list/all/\(pid)/\(category)/\(page)")
@@ -106,7 +106,10 @@ extension AnixartAPI {
     /// profile list used by the Android/iOS app, so changes sync across clients.
     @discardableResult
     func setProfileListStatus(releaseId: Int64, category: BookmarkCategory?) async throws -> SimpleResponse {
-        try await post("profile/list/edit/\(releaseId)/\(category?.rawValue ?? 0)")
+        guard let category else {
+            throw APIError.server(code: 400, message: "Нужно знать текущую категорию, чтобы удалить релиз из списка")
+        }
+        return try await addToList(releaseId: releaseId, category: category)
     }
 
     @discardableResult
@@ -120,24 +123,42 @@ extension AnixartAPI {
     /// Добавить релиз в категорию (или переместить, если уже в другой).
     @discardableResult
     func addToList(releaseId: Int64, category: Int) async throws -> SimpleResponse {
-        do {
-            return try await setProfileListStatus(releaseId: releaseId, category: category)
-        } catch {
-            return try await get("profile/list/add/\(category)/\(releaseId)")
+        guard let category = BookmarkCategory(rawValue: category) else {
+            throw APIError.server(code: 400, message: "Неизвестная категория списка")
         }
+        return try await addToList(releaseId: releaseId, category: category)
     }
 
-    /// Убрать релиз из любой категории закладок.
+    @discardableResult
+    func addToList(releaseId: Int64, category: BookmarkCategory) async throws -> SimpleResponse {
+        try await get("profile/list/add/\(category.rawValue)/\(releaseId)")
+    }
+
+    /// Убрать релиз из конкретной категории закладок.
+    @discardableResult
+    func removeFromList(releaseId: Int64, category: BookmarkCategory) async throws -> SimpleResponse {
+        try await get("profile/list/delete/\(category.rawValue)/\(releaseId)")
+    }
+
+    /// Best-effort removal when the current category is unknown.
     @discardableResult
     func removeFromList(releaseId: Int64) async throws -> SimpleResponse {
-        do {
-            return try await setProfileListStatus(releaseId: releaseId, category: Optional<BookmarkCategory>.none)
-        } catch {
-            return try await get("profile/list/delete/0/\(releaseId)")
+        var lastError: Error?
+        for category in BookmarkCategory.displayOrder {
+            do { return try await removeFromList(releaseId: releaseId, category: category) }
+            catch { lastError = error }
         }
+        throw lastError ?? APIError.empty
     }
 
     /// Добавить/убрать в избранное (звёздочка, отдельно от 5 категорий).
+    func favorites(page: Int = 0, sort: Int = 2, filterAnnounce: Int = 0) async throws -> ReleasesResponse {
+        try await get("favorite/all/\(page)", query: [
+            URLQueryItem(name: "sort", value: String(sort)),
+            URLQueryItem(name: "filter_announce", value: String(filterAnnounce))
+        ])
+    }
+
     @discardableResult
     func addToFavorites(releaseId: Int64) async throws -> SimpleResponse {
         try await get("favorite/add/\(releaseId)")

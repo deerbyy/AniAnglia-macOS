@@ -10,7 +10,7 @@ Native macOS client for the Anixart anime catalog. The app is SwiftUI-first, tar
 - Episode and trailer playback through `WKWebView` embed players.
 - Login/password auth with token/profile id stored in Keychain.
 - Anonymous browsing mode by default.
-- Account-backed bookmark sync for all five Anixart watch lists: "Смотрю", "В планах", "Просмотрено", "Отложено", "Брошено".
+- Account-backed bookmark sync for Anixart favorites plus all five watch lists: "Смотрю", "В планах", "Просмотрено", "Отложено", "Брошено".
 - Expanded Anixart account profile mapping: username/avatar, privacy flags, social links, list counts, favorites, watched episodes, comments, collections, videos, friends, rating score, and watched time.
 - Profile screen and settings for appearance, data cache, playback defaults, help, and rules.
 
@@ -32,9 +32,11 @@ Screenshots should be captured from the first full Xcode/CI run and added here w
 - `GET /video/release/{release_id}`
 - `GET /release/comment/all/{release_id}/{page}`
 - `GET /favorite/all/{page}`
-- `POST /favorite/add/{release_id}`
-- `POST /favorite/delete/{release_id}`
-- `POST /profile/list/edit/{release_id}/{list_id}`
+- `GET /favorite/add/{release_id}`
+- `GET /favorite/delete/{release_id}`
+- `GET /profile/list/add/{list_id}/{release_id}`
+- `GET /profile/list/delete/{list_id}/{release_id}`
+- `GET /profile/list/all/{profile_id}/{list_id}/{page}`
 - `GET /profile/{profile_id}`
 
 All requests use `User-Agent: AnixartApp/9.0 beta-11-25052914 (Android 11; SDK 30; arm64-v8a)`.

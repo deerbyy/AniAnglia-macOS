@@ -2,11 +2,11 @@ import SwiftUI
 
 @MainActor
 final class BookmarksViewModel: ObservableObject {
-    @Published var category: BookmarkCategory = .watching
+    @Published var section: AccountLibrarySection = .favorites
 
     func select(categoryId: Int) {
         guard let next = BookmarkCategory(rawValue: categoryId) else { return }
-        category = next
+        section = .list(next)
     }
 }
 
@@ -18,14 +18,19 @@ struct BookmarksView: View {
         BookmarksContent(
             appState: appState,
             syncStore: appState.bookmarkSync,
-            category: $vm.category
+            section: $vm.section
         )
         .navigationTitle("Закладки")
         .task(id: appState.auth.profileId) {
             await appState.bookmarkSync.syncAll(api: appState.api)
         }
-        .task(id: vm.category) {
-            await appState.bookmarkSync.syncCategory(api: appState.api, category: vm.category)
+        .task(id: vm.section) {
+            switch vm.section {
+            case .favorites:
+                await appState.bookmarkSync.syncFavorites(api: appState.api)
+            case .list(let category):
+                await appState.bookmarkSync.syncCategory(api: appState.api, category: category)
+            }
         }
         .onAppear {
             if let pending = appState.pendingBookmarkCategory {
@@ -45,11 +50,11 @@ struct BookmarksView: View {
 private struct BookmarksContent: View {
     @ObservedObject var appState: AppState
     @ObservedObject var syncStore: BookmarkSyncStore
-    @Binding var category: BookmarkCategory
+    @Binding var section: AccountLibrarySection
 
-    private var categoryPicker: some View {
-        Picker("", selection: $category) {
-            ForEach(BookmarkCategory.displayOrder) { item in
+    private var sectionPicker: some View {
+        Picker("", selection: $section) {
+            ForEach(AccountLibrarySection.displayOrder) { item in
                 Text(item.title).tag(item)
             }
         }
@@ -75,7 +80,7 @@ private struct BookmarksContent: View {
             ProgressView().padding(40).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let error = syncStore.errorMessage, releases.isEmpty {
             ErrorState(message: error) {
-                Task { await syncStore.syncCategory(api: appState.api, category: category, force: true) }
+                Task { await reloadCurrentSection(force: true) }
             }
         } else if releases.isEmpty {
             Text("Список пуст")
@@ -99,7 +104,7 @@ private struct BookmarksContent: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 8) {
-                categoryPicker
+                sectionPicker
                 HStack {
                     if let syncedAt = syncStore.lastSyncedAt {
                         Text("Синхронизировано: \(syncedAt.formatted(date: .omitted, time: .shortened))")
@@ -128,6 +133,20 @@ private struct BookmarksContent: View {
     }
 
     private var releases: [Release] {
-        syncStore.releases(for: category)
+        switch section {
+        case .favorites:
+            return syncStore.favoriteReleases
+        case .list(let category):
+            return syncStore.releases(for: category)
+        }
+    }
+
+    private func reloadCurrentSection(force: Bool) async {
+        switch section {
+        case .favorites:
+            await syncStore.syncFavorites(api: appState.api, force: force)
+        case .list(let category):
+            await syncStore.syncCategory(api: appState.api, category: category, force: force)
+        }
     }
 }

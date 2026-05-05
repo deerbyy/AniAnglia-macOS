@@ -210,7 +210,7 @@ struct ProfileView: View {
             }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], alignment: .leading, spacing: 12) {
-                accountMetric("Избранное", profile.favoriteCount, "star")
+                accountMetric("Избранное", profile.favoriteCount ?? appState.bookmarkSync.favoritesCount, "star")
                 accountMetric("Эпизоды", profile.watchedEpisodeCount, "play.rectangle")
                 accountMetric("Комментарии", profile.commentCount, "text.bubble")
                 accountMetric("Коллекции", profile.collectionCount, "rectangle.stack")
@@ -340,6 +340,40 @@ private struct ProfileBookmarkSections: View {
     let isLoading: Bool
 
     var body: some View {
+        let favorites = Array(syncStore.favoriteReleases.prefix(8))
+        if !favorites.isEmpty || isLoading {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Circle().fill(Color.yellow).frame(width: 10, height: 10)
+                    Text("Избранное").font(.title3.bold())
+                    Spacer()
+                    Button("Все →") {
+                        appState.selectSidebar(.bookmarks)
+                    }
+                    .buttonStyle(.borderless)
+                }
+                if favorites.isEmpty {
+                    Text("Список пуст")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .padding(.vertical, 8)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 14) {
+                            ForEach(favorites) { release in
+                                NavigationLink(value: release) {
+                                    ReleaseCard(release: release)
+                                        .frame(width: 160)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.bottom, 4)
+                    }
+                }
+            }
+        }
+
         ForEach(BookmarkCategory.displayOrder) { category in
             let releases = Array(syncStore.releases(for: category).prefix(8))
             if !releases.isEmpty || isLoading {

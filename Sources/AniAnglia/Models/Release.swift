@@ -162,6 +162,33 @@ struct Release: Codable, Identifiable, Hashable {
             yourVote: yourVote
         )
     }
+
+    func withFavorite(_ favorite: Bool?) -> Release {
+        Release(
+            id: id,
+            titleRu: titleRu,
+            titleOriginal: titleOriginal,
+            titleAlt: titleAlt,
+            year: year,
+            country: country,
+            studio: studio,
+            director: director,
+            author: author,
+            description: description,
+            image: image,
+            status: status,
+            category: category,
+            genres: genres,
+            episodesTotal: episodesTotal,
+            episodesReleased: episodesReleased,
+            grade: grade,
+            screenshotImageUrls: screenshotImageUrls,
+            isFavorite: favorite,
+            profileListStatus: profileListStatus,
+            voteCount: voteCount,
+            yourVote: yourVote
+        )
+    }
 }
 
 enum BookmarkCategory: Int, CaseIterable, Identifiable, Hashable {
@@ -184,6 +211,27 @@ enum BookmarkCategory: Int, CaseIterable, Identifiable, Hashable {
     }
 
     static let displayOrder: [BookmarkCategory] = [.watching, .planned, .watched, .onHold, .dropped]
+}
+
+enum AccountLibrarySection: Hashable, Identifiable {
+    case favorites
+    case list(BookmarkCategory)
+
+    var id: String {
+        switch self {
+        case .favorites: return "favorites"
+        case .list(let category): return "list-\(category.rawValue)"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .favorites: return "Избранное"
+        case .list(let category): return category.title
+        }
+    }
+
+    static let displayOrder: [AccountLibrarySection] = [.favorites] + BookmarkCategory.displayOrder.map(AccountLibrarySection.list)
 }
 
 struct NamedItem: Codable, Hashable {
