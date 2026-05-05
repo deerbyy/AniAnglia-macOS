@@ -2,21 +2,11 @@ import SwiftUI
 
 @MainActor
 final class BookmarksViewModel: ObservableObject {
-    @Published var releases: [Release] = []
-    @Published var isLoading = false
-    @Published var errorMessage: String?
-    @Published var category: Int = 2 // Watching by default
+    @Published var category: BookmarkCategory = .watching
 
-    func load(api: AnixartAPI) async {
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            let resp = try await api.bookmarks(category: category, page: 0)
-            releases = resp.items
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+    func select(categoryId: Int) {
+        guard let next = BookmarkCategory(rawValue: categoryId) else { return }
+        category = next
     }
 }
 
@@ -24,39 +14,43 @@ struct BookmarksView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm = BookmarksViewModel()
 
-    private let categories: [(Int, String)] = [
-        (2, "Смотрю"), (1, "В планах"), (3, "Просмотрено"), (4, "Отложено"), (5, "Брошено")
-    ]
-
     var body: some View {
-        VStack(spacing: 0) {
-            categoryPicker
-                .padding(.horizontal)
-                .padding(.top, 12)
-            content
-        }
+        BookmarksContent(
+            appState: appState,
+            syncStore: appState.bookmarkSync,
+            category: $vm.category
+        )
         .navigationTitle("Закладки")
+        .task(id: appState.auth.profileId) {
+            await appState.bookmarkSync.syncAll(api: appState.api)
+        }
         .task(id: vm.category) {
-            await vm.load(api: appState.api)
+            await appState.bookmarkSync.syncCategory(api: appState.api, category: vm.category)
         }
         .onAppear {
             if let pending = appState.pendingBookmarkCategory {
-                vm.category = pending
+                vm.select(categoryId: pending)
                 appState.pendingBookmarkCategory = nil
             }
         }
         .onChange(of: appState.pendingBookmarkCategory) { newValue in
             if let pending = newValue {
-                vm.category = pending
+                vm.select(categoryId: pending)
                 appState.pendingBookmarkCategory = nil
             }
         }
     }
+}
+
+private struct BookmarksContent: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var syncStore: BookmarkSyncStore
+    @Binding var category: BookmarkCategory
 
     private var categoryPicker: some View {
-        Picker("", selection: $vm.category) {
-            ForEach(categories, id: \.0) { (id, title) in
-                Text(title).tag(id)
+        Picker("", selection: $category) {
+            ForEach(BookmarkCategory.displayOrder) { item in
+                Text(item.title).tag(item)
             }
         }
         .pickerStyle(.segmented)
@@ -77,20 +71,20 @@ struct BookmarksView: View {
                     .padding(.horizontal, 40)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if vm.isLoading && vm.releases.isEmpty {
+        } else if syncStore.isSyncing && releases.isEmpty {
             ProgressView().padding(40).frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let error = vm.errorMessage, vm.releases.isEmpty {
+        } else if let error = syncStore.errorMessage, releases.isEmpty {
             ErrorState(message: error) {
-                Task { await vm.load(api: appState.api) }
+                Task { await syncStore.syncCategory(api: appState.api, category: category, force: true) }
             }
-        } else if vm.releases.isEmpty {
+        } else if releases.isEmpty {
             Text("Список пуст")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 16)], alignment: .leading, spacing: 20) {
-                    ForEach(vm.releases) { release in
+                    ForEach(releases) { release in
                         NavigationLink(value: release) {
                             ReleaseCard(release: release)
                         }
@@ -100,5 +94,40 @@ struct BookmarksView: View {
                 .padding()
             }
         }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 8) {
+                categoryPicker
+                HStack {
+                    if let syncedAt = syncStore.lastSyncedAt {
+                        Text("Синхронизировано: \(syncedAt.formatted(date: .omitted, time: .shortened))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Синхронизация с аккаунтом Anixart")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        Task { await syncStore.syncAll(api: appState.api, force: true) }
+                    } label: {
+                        Label("Синхронизировать", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .controlSize(.small)
+                    .disabled(syncStore.isSyncing || !appState.auth.isAuthenticated)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top, 12)
+
+            content
+        }
+    }
+
+    private var releases: [Release] {
+        syncStore.releases(for: category)
     }
 }

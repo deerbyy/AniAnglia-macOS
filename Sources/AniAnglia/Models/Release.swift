@@ -35,6 +35,55 @@ struct Release: Codable, Identifiable, Hashable {
     var screenshots: [URL] {
         (screenshotImageUrls ?? []).compactMap { URL(string: $0) }
     }
+
+    func withProfileListStatus(_ status: Int?) -> Release {
+        Release(
+            id: id,
+            titleRu: titleRu,
+            titleOriginal: titleOriginal,
+            titleAlt: titleAlt,
+            year: year,
+            country: country,
+            studio: studio,
+            director: director,
+            author: author,
+            description: description,
+            image: image,
+            status: self.status,
+            category: category,
+            genres: genres,
+            episodesTotal: episodesTotal,
+            episodesReleased: episodesReleased,
+            grade: grade,
+            screenshotImageUrls: screenshotImageUrls,
+            isFavorite: isFavorite,
+            profileListStatus: status,
+            voteCount: voteCount,
+            yourVote: yourVote
+        )
+    }
+}
+
+enum BookmarkCategory: Int, CaseIterable, Identifiable, Hashable {
+    case planned = 1
+    case watching = 2
+    case watched = 3
+    case onHold = 4
+    case dropped = 5
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .planned: return "В планах"
+        case .watching: return "Смотрю"
+        case .watched: return "Просмотрено"
+        case .onHold: return "Отложено"
+        case .dropped: return "Брошено"
+        }
+    }
+
+    static let displayOrder: [BookmarkCategory] = [.watching, .planned, .watched, .onHold, .dropped]
 }
 
 struct NamedItem: Codable, Hashable {

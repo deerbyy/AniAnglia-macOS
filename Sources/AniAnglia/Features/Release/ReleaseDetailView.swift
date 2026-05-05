@@ -52,17 +52,13 @@ final class ReleaseDetailViewModel: ObservableObject {
         }
     }
 
-    func setBookmark(api: AnixartAPI, releaseId: Int64, category: Int?) async {
+    func setBookmark(api: AnixartAPI, syncStore: BookmarkSyncStore, release: Release, category: BookmarkCategory?) async {
         bookmarkPending = true
         defer { bookmarkPending = false }
         do {
-            if let category {
-                _ = try await api.addToList(releaseId: releaseId, category: category)
-                bookmarkCategory = category
-            } else {
-                _ = try await api.removeFromList(releaseId: releaseId)
-                bookmarkCategory = nil
-            }
+            try await syncStore.setStatus(api: api, release: release, category: category)
+            bookmarkCategory = category?.rawValue
+            self.release = release.withProfileListStatus(category?.rawValue)
             bookmarkError = nil
         } catch {
             bookmarkError = error.localizedDescription
@@ -220,41 +216,38 @@ struct ReleaseDetailView: View {
     }
 
     private var bookmarkMenu: some View {
-        let cats: [(Int, String, Color)] = [
-            (1, "В планах", .yellow),
-            (2, "Смотрю", .indigo),
-            (3, "Просмотрено", .green),
-            (4, "Отложено", .purple),
-            (5, "Брошено", .red)
-        ]
         let current = vm.bookmarkCategory
-        let currentLabel = cats.first(where: { $0.0 == current })
+        let currentCategory = current.flatMap(BookmarkCategory.init(rawValue:))
         return Menu {
-            ForEach(cats, id: \.0) { (id, name, _) in
+            ForEach(BookmarkCategory.displayOrder) { category in
                 Button {
-                    Task { await vm.setBookmark(api: appState.api, releaseId: releaseId, category: id) }
+                    if let release = effectiveRelease {
+                        Task { await vm.setBookmark(api: appState.api, syncStore: appState.bookmarkSync, release: release, category: category) }
+                    }
                 } label: {
-                    if current == id {
-                        Label(name, systemImage: "checkmark")
+                    if current == category.rawValue {
+                        Label(category.title, systemImage: "checkmark")
                     } else {
-                        Text(name)
+                        Text(category.title)
                     }
                 }
             }
             if current != nil {
                 Divider()
                 Button(role: .destructive) {
-                    Task { await vm.setBookmark(api: appState.api, releaseId: releaseId, category: nil) }
+                    if let release = effectiveRelease {
+                        Task { await vm.setBookmark(api: appState.api, syncStore: appState.bookmarkSync, release: release, category: nil) }
+                    }
                 } label: {
                     Label("Убрать из списка", systemImage: "bookmark.slash")
                 }
             }
         } label: {
-            Label(currentLabel?.1 ?? "В закладки",
-                  systemImage: currentLabel == nil ? "bookmark" : "bookmark.fill")
+            Label(currentCategory?.title ?? "В закладки",
+                  systemImage: currentCategory == nil ? "bookmark" : "bookmark.fill")
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .foregroundStyle(currentLabel?.2 ?? .accentColor)
+                .foregroundStyle(currentCategory?.color ?? .accentColor)
         }
         .fixedSize()
         .disabled(vm.bookmarkPending || !appState.auth.isAuthenticated)
@@ -381,6 +374,18 @@ private struct VideoThumbnail: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+private extension BookmarkCategory {
+    var color: Color {
+        switch self {
+        case .planned: return .yellow
+        case .watching: return .indigo
+        case .watched: return .green
+        case .onHold: return .purple
+        case .dropped: return .red
         }
     }
 }

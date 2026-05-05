@@ -5,6 +5,7 @@ import Combine
 final class AppState: ObservableObject {
     let api: AnixartAPI
     let auth: AuthStore
+    let bookmarkSync: BookmarkSyncStore
     @Published var selectedSidebar: SidebarItem = .home
 
     /// When set, a release should be pushed onto the active navigation stack.
@@ -18,6 +19,7 @@ final class AppState: ObservableObject {
         let auth = AuthStore()
         self.auth = auth
         self.api = AnixartAPI(auth: auth)
+        self.bookmarkSync = BookmarkSyncStore()
     }
 
     /// Switch to a sidebar item, optionally pre-selecting a bookmark category.

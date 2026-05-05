@@ -8,7 +8,7 @@ final class ProfileViewModel: ObservableObject {
     @Published var isWorking = false
     @Published var errorMessage: String?
 
-    /// Mapping: bookmark category id -> first page of releases (preview).
+    /// Mapping: bookmark category id -> first synced releases (preview).
     @Published var previews: [Int: [Release]] = [:]
     @Published var previewsLoading = false
 
@@ -22,16 +22,12 @@ final class ProfileViewModel: ObservableObject {
         }
     }
 
-    func loadBookmarkPreviews(api: AnixartAPI) async {
+    func loadBookmarkPreviews(api: AnixartAPI, syncStore: BookmarkSyncStore) async {
         previewsLoading = true
         defer { previewsLoading = false }
-        for cat in [2, 1, 3, 4, 5] {
-            do {
-                let resp = try await api.bookmarks(category: cat, page: 0)
-                previews[cat] = Array(resp.items.prefix(8))
-            } catch {
-                previews[cat] = []
-            }
+        await syncStore.syncAll(api: api)
+        for category in BookmarkCategory.displayOrder {
+            previews[category.rawValue] = Array(syncStore.releases(for: category).prefix(8))
         }
     }
 
@@ -68,15 +64,6 @@ struct ProfileView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm = ProfileViewModel()
 
-    /// (categoryId, title, accent color) — order matches what users expect on iOS.
-    private let categories: [(Int, String, Color)] = [
-        (2, "Смотрю", .indigo),
-        (1, "В планах", .yellow),
-        (3, "Просмотрено", .green),
-        (4, "Отложено", .purple),
-        (5, "Брошено", .red)
-    ]
-
     var body: some View {
         Group {
             if appState.auth.isAuthenticated {
@@ -89,7 +76,7 @@ struct ProfileView: View {
         .task(id: appState.auth.profileId) {
             await vm.loadCurrentProfile(api: appState.api, auth: appState.auth)
             if appState.auth.isAuthenticated {
-                await vm.loadBookmarkPreviews(api: appState.api)
+                await vm.loadBookmarkPreviews(api: appState.api, syncStore: appState.bookmarkSync)
             }
         }
     }
@@ -140,13 +127,14 @@ struct ProfileView: View {
                 Button {
                     Task {
                         await vm.loadCurrentProfile(api: appState.api, auth: appState.auth)
-                        await vm.loadBookmarkPreviews(api: appState.api)
+                        await vm.loadBookmarkPreviews(api: appState.api, syncStore: appState.bookmarkSync)
                     }
                 } label: {
                     Label("Обновить", systemImage: "arrow.clockwise")
                 }
                 Button(role: .destructive) {
                     appState.auth.signOut()
+                    appState.bookmarkSync.clear()
                     vm.profile = nil
                     vm.previews = [:]
                 } label: {
@@ -167,22 +155,22 @@ struct ProfileView: View {
     }
 
     private func statsGrid(for profile: Profile) -> some View {
-        let stats: [(String, Int?, Int)] = [
-            ("Смотрю", profile.watchingReleasesCount, 2),
-            ("В планах", profile.plannedReleasesCount, 1),
-            ("Просмотрено", profile.watchedReleasesCount, 3),
-            ("Отложено", profile.holdOnReleasesCount, 4),
-            ("Брошено", profile.abandonedReleasesCount, 5)
+        let stats: [(BookmarkCategory, Int?)] = [
+            (.watching, profile.watchingReleasesCount),
+            (.planned, profile.plannedReleasesCount),
+            (.watched, profile.watchedReleasesCount),
+            (.onHold, profile.holdOnReleasesCount),
+            (.dropped, profile.abandonedReleasesCount)
         ]
         return HStack(spacing: 12) {
-            ForEach(stats, id: \.2) { (title, value, cat) in
+            ForEach(stats, id: \.0) { (category, value) in
                 Button {
-                    appState.selectSidebar(.bookmarks, bookmarkCategory: cat)
+                    appState.selectSidebar(.bookmarks, bookmarkCategory: category.rawValue)
                 } label: {
                     VStack(spacing: 4) {
-                        Text("\(value ?? 0)")
+                        Text("\(value ?? appState.bookmarkSync.count(for: category))")
                             .font(.title3.bold().monospacedDigit())
-                        Text(title)
+                        Text(category.title)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -192,48 +180,18 @@ struct ProfileView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .buttonStyle(.plain)
-                .help("Открыть «\(title)»")
+                .help("Открыть «\(category.title)»")
             }
         }
     }
 
     @ViewBuilder
     private var bookmarkSections: some View {
-        ForEach(categories, id: \.0) { (cat, title, color) in
-            let releases = vm.previews[cat] ?? []
-            if !releases.isEmpty || vm.previewsLoading {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Circle().fill(color).frame(width: 10, height: 10)
-                        Text(title).font(.title3.bold())
-                        Spacer()
-                        Button("Все →") {
-                            appState.selectSidebar(.bookmarks, bookmarkCategory: cat)
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                    if releases.isEmpty {
-                        Text("Список пуст")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .padding(.vertical, 8)
-                    } else {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(alignment: .top, spacing: 14) {
-                                ForEach(releases) { release in
-                                    NavigationLink(value: release) {
-                                        ReleaseCard(release: release)
-                                            .frame(width: 160)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.bottom, 4)
-                        }
-                    }
-                }
-            }
-        }
+        ProfileBookmarkSections(
+            appState: appState,
+            syncStore: appState.bookmarkSync,
+            isLoading: vm.previewsLoading
+        )
     }
 
     private var signInForm: some View {
@@ -264,7 +222,13 @@ struct ProfileView: View {
             }
 
             Button {
-                Task { await vm.signIn(api: appState.api, auth: appState.auth) }
+                Task {
+                    await vm.signIn(api: appState.api, auth: appState.auth)
+                    if appState.auth.isAuthenticated {
+                        await vm.loadCurrentProfile(api: appState.api, auth: appState.auth)
+                        await vm.loadBookmarkPreviews(api: appState.api, syncStore: appState.bookmarkSync)
+                    }
+                }
             } label: {
                 if vm.isWorking {
                     ProgressView().controlSize(.small)
@@ -285,5 +249,61 @@ struct ProfileView: View {
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct ProfileBookmarkSections: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var syncStore: BookmarkSyncStore
+    let isLoading: Bool
+
+    var body: some View {
+        ForEach(BookmarkCategory.displayOrder) { category in
+            let releases = Array(syncStore.releases(for: category).prefix(8))
+            if !releases.isEmpty || isLoading {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Circle().fill(category.color).frame(width: 10, height: 10)
+                        Text(category.title).font(.title3.bold())
+                        Spacer()
+                        Button("Все →") {
+                            appState.selectSidebar(.bookmarks, bookmarkCategory: category.rawValue)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    if releases.isEmpty {
+                        Text("Список пуст")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .padding(.vertical, 8)
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .top, spacing: 14) {
+                                ForEach(releases) { release in
+                                    NavigationLink(value: release) {
+                                        ReleaseCard(release: release)
+                                            .frame(width: 160)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.bottom, 4)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private extension BookmarkCategory {
+    var color: Color {
+        switch self {
+        case .planned: return .yellow
+        case .watching: return .indigo
+        case .watched: return .green
+        case .onHold: return .purple
+        case .dropped: return .red
+        }
     }
 }

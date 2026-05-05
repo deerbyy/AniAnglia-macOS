@@ -98,16 +98,43 @@ extension AnixartAPI {
         return try await get("profile/list/all/\(pid)/\(category)/\(page)")
     }
 
+    func bookmarks(category: BookmarkCategory, page: Int = 0) async throws -> ReleasesResponse {
+        try await bookmarks(category: category.rawValue, page: page)
+    }
+
+    /// Official Anixart list status mutation. This is the same account-backed
+    /// profile list used by the Android/iOS app, so changes sync across clients.
+    @discardableResult
+    func setProfileListStatus(releaseId: Int64, category: BookmarkCategory?) async throws -> SimpleResponse {
+        try await post("profile/list/edit/\(releaseId)/\(category?.rawValue ?? 0)")
+    }
+
+    @discardableResult
+    func setProfileListStatus(releaseId: Int64, category: Int?) async throws -> SimpleResponse {
+        if let category {
+            return try await setProfileListStatus(releaseId: releaseId, category: BookmarkCategory(rawValue: category))
+        }
+        return try await setProfileListStatus(releaseId: releaseId, category: Optional<BookmarkCategory>.none)
+    }
+
     /// Добавить релиз в категорию (или переместить, если уже в другой).
     @discardableResult
     func addToList(releaseId: Int64, category: Int) async throws -> SimpleResponse {
-        try await get("profile/list/add/\(category)/\(releaseId)")
+        do {
+            return try await setProfileListStatus(releaseId: releaseId, category: category)
+        } catch {
+            return try await get("profile/list/add/\(category)/\(releaseId)")
+        }
     }
 
     /// Убрать релиз из любой категории закладок.
     @discardableResult
     func removeFromList(releaseId: Int64) async throws -> SimpleResponse {
-        try await get("profile/list/delete/0/\(releaseId)")
+        do {
+            return try await setProfileListStatus(releaseId: releaseId, category: Optional<BookmarkCategory>.none)
+        } catch {
+            return try await get("profile/list/delete/0/\(releaseId)")
+        }
     }
 
     /// Добавить/убрать в избранное (звёздочка, отдельно от 5 категорий).
