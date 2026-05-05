@@ -4,6 +4,8 @@ import SwiftUI
 final class HomeViewModel: ObservableObject {
     @Published var watching: [Release] = []
     @Published var recommendations: [Release] = []
+    @Published var discussing: [Release] = []
+    @Published var commentsWeek: [ReleaseComment] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
 
@@ -15,6 +17,16 @@ final class HomeViewModel: ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+        if let discussingResp = try? await api.discoverDiscussing() {
+            self.discussing = discussingResp.items
+        } else {
+            self.discussing = []
+        }
+        if let commentsResp = try? await api.discoverCommentsWeek() {
+            self.commentsWeek = commentsResp.content
+        } else {
+            self.commentsWeek = []
         }
         // Personal recommendations only when authed (don't fail the whole load if this fails).
         if api.auth.isAuthenticated {
@@ -48,7 +60,13 @@ struct HomeView: View {
                     if !vm.recommendations.isEmpty {
                         section(title: "Рекомендации", releases: vm.recommendations)
                     }
+                    if !vm.discussing.isEmpty {
+                        section(title: "Обсуждают", releases: vm.discussing)
+                    }
                     section(title: "Сейчас смотрят", releases: vm.watching)
+                    if !vm.commentsWeek.isEmpty {
+                        commentsSection
+                    }
                 }
             }
             .padding(24)
@@ -95,6 +113,71 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    private var commentsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Комментарии недели")
+                .font(.title3.bold())
+            LazyVStack(alignment: .leading, spacing: 10) {
+                ForEach(Array(vm.commentsWeek.prefix(6))) { comment in
+                    if let release = comment.release {
+                        NavigationLink(value: release) {
+                            WeeklyCommentRow(comment: comment)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        WeeklyCommentRow(comment: comment)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct WeeklyCommentRow: View {
+    let comment: ReleaseComment
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            RemoteImage(url: comment.profile?.avatarURL, contentMode: .fill) {
+                Circle().fill(Color.secondary.opacity(0.2))
+            }
+            .frame(width: 34, height: 34)
+            .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(comment.profile?.displayName ?? "—")
+                        .font(.callout.bold())
+                    if !comment.formattedDate.isEmpty {
+                        Text(comment.formattedDate)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if let score = comment.voteCount {
+                        Label(String(score), systemImage: "hand.thumbsup")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let originTitle = comment.originTitle {
+                    Text(originTitle)
+                        .font(.caption)
+                        .foregroundStyle(.tint)
+                        .lineLimit(1)
+                }
+                Text(comment.isSpoiler == true ? "Спойлер" : comment.message)
+                    .font(.callout)
+                    .foregroundStyle(comment.isSpoiler == true ? .secondary : .primary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 

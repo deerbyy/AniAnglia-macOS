@@ -241,7 +241,7 @@ private struct CommentRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text(comment.profile?.login ?? "—")
+                    Text(comment.profile?.displayName ?? "—")
                         .font(.callout.bold())
                     Text(comment.formattedDate)
                         .font(.caption)

@@ -4,7 +4,7 @@ Native macOS client for the Anixart anime catalog. The app is SwiftUI-first, tar
 
 ## Features
 
-- Home screen with "Интересное", "Смотрят сейчас", and random release carousels.
+- Home screen with "Рекомендации", "Обсуждают", "Сейчас смотрят", and "Комментарии недели" sections.
 - Debounced search with pagination and genre/year/type filters.
 - Release detail page with poster zoom, metadata, genres, expandable description, episodes, screenshots, video blocks, comments, and bookmark actions.
 - Episode and trailer playback through `WKWebView` embed players.
@@ -21,8 +21,10 @@ Screenshots should be captured from the first full Xcode/CI run and added here w
 ## API Endpoints Used
 
 - `POST /auth/signIn`
-- `GET /discover/interesting`
 - `GET /discover/watching/{page}`
+- `GET /discover/recommendations/{page}`
+- `POST /discover/discussing`
+- `POST /discover/comments`
 - `GET /release/random`
 - `POST /search/releases/{page}`
 - `GET /filter/0`

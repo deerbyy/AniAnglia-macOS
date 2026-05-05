@@ -13,6 +13,16 @@ extension AnixartAPI {
         try await get("discover/recommendations/\(page)")
     }
 
+    /// "Обсуждают" from the Anixart Discover screen.
+    func discoverDiscussing() async throws -> ReleasesResponse {
+        try await post("discover/discussing")
+    }
+
+    /// "Комментарии недели" from the Anixart Discover screen.
+    func discoverCommentsWeek() async throws -> CommentsResponse {
+        try await post("discover/comments")
+    }
+
     // MARK: - Release
 
     func release(id: Int64) async throws -> Release {
