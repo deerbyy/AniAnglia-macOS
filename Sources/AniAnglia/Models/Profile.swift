@@ -224,23 +224,28 @@ struct SignInResponse: Decodable, CodedResponse {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.code = (try? c.decode(Int.self, forKey: .code)) ?? 0
-        self.message = try? c.decode(String.self, forKey: .message)
-        self.profile = try? c.decode(Profile.self, forKey: .profile)
-        self.profileId = (try? c.decode(Int64.self, forKey: .profileId))
+        let decodedProfile = try? c.decode(Profile.self, forKey: .profile)
+        let decodedProfileId = (try? c.decode(Int64.self, forKey: .profileId))
             ?? (try? c.decode(Int64.self, forKey: .profile_id))
-            ?? profile?.id
+            ?? decodedProfile?.id
+        let decodedProfileToken: ProfileToken?
 
         if let tokenObject = try? c.decode(ProfileToken.self, forKey: .profileToken) {
-            self.profileToken = tokenObject
+            decodedProfileToken = tokenObject
         } else if let tokenObject = try? c.decode(ProfileToken.self, forKey: .profile_token) {
-            self.profileToken = tokenObject
+            decodedProfileToken = tokenObject
         } else {
             let token = (try? c.decode(String.self, forKey: .profileToken))
                 ?? (try? c.decode(String.self, forKey: .profile_token))
                 ?? (try? c.decode(String.self, forKey: .token))
-            self.profileToken = token.map { ProfileToken(id: profileId, token: $0, sign: nil) }
+            decodedProfileToken = token.map { ProfileToken(id: decodedProfileId, token: $0, sign: nil) }
         }
+
+        self.code = (try? c.decode(Int.self, forKey: .code)) ?? 0
+        self.message = try? c.decode(String.self, forKey: .message)
+        self.profile = decodedProfile
+        self.profileId = decodedProfileId
+        self.profileToken = decodedProfileToken
     }
 }
 
