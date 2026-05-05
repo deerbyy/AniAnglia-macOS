@@ -1,47 +1,84 @@
-# AniAnglia for macOS
+# AniAnglia-macOS
 
-Неофициальный нативный клиент [Anixart](https://anixart.tv) для macOS.
+Native macOS client for the Anixart anime catalog. The app is SwiftUI-first, targets macOS 13 Ventura and newer, and uses pure Swift networking through `URLSession` and `Codable`.
 
-## Стек
-- **Swift 5.9 + SwiftUI** (NavigationSplitView, async/await)
-- **Минимум macOS 13 Ventura** (Apple Silicon + Intel)
-- **URLSession + Codable** — прямой доступ к `https://api.anixart.tv` без сторонних библиотек
-- **WKWebView** — встроенные плееры Kodik / Sibnet / VK / YouTube
-- **Keychain** — хранение токена авторизации
+## Features
 
-## Сборка
+- Home screen with "Интересное", "Смотрят сейчас", and random release carousels.
+- Debounced search with pagination and genre/year/type filters.
+- Release detail page with poster zoom, metadata, genres, expandable description, episodes, screenshots, video blocks, comments, and bookmark actions.
+- Episode and trailer playback through `WKWebView` embed players.
+- Login/password auth with token/profile id stored in Keychain.
+- Anonymous browsing mode by default.
+- Bookmarks with the five watch statuses: "Смотрю", "В планах", "Просмотрено", "Отложено", "Брошено".
+- Profile screen and settings for appearance, data cache, playback defaults, help, and rules.
 
-Проект генерируется через [XcodeGen](https://github.com/yonaskolb/XcodeGen) — `AniAnglia.xcodeproj` не закоммичен.
+## Screenshots
+
+Screenshots should be captured from the first full Xcode/CI run and added here with the release artifact. This workspace can compile the Swift sources, but the active developer directory is Command Line Tools rather than full Xcode, so the app cannot be launched locally from `xcodebuild` here.
+
+## API Endpoints Used
+
+- `POST /auth/signIn`
+- `GET /discover/interesting`
+- `GET /discover/watching/{page}`
+- `GET /release/random`
+- `POST /search/releases/{page}`
+- `GET /filter/0`
+- `GET /release/{release_id}`
+- `GET /episode/{release_id}`
+- `GET /episode/{release_id}/{source_id}/{episode_id}`
+- `GET /video/release/{release_id}`
+- `GET /release/comment/all/{release_id}/{page}`
+- `GET /favorite/all/{page}`
+- `POST /favorite/add/{release_id}`
+- `POST /favorite/delete/{release_id}`
+- `POST /profile/list/edit/{release_id}/{list_id}`
+- `GET /profile/{profile_id}`
+
+All requests use `User-Agent: AnixartApp/9.0 beta-11-25052914 (Android 11; SDK 30; arm64-v8a)`.
+
+## Build Locally
+
+Install full Xcode, then select it:
 
 ```bash
-brew install xcodegen
-xcodegen generate
-open AniAnglia.xcodeproj
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 ```
 
-## CI / DMG
-GitHub Actions (`.github/workflows/build-dmg.yml`) на каждый push в `main` собирает ad-hoc подписанный `.dmg` и кладёт в артефакты.
+Build and run:
 
-Скачать последнюю сборку: [Actions → Build DMG → AniAnglia-macOS-DMG](https://github.com/deerbyy/AniAnglia-macOS/actions).
+```bash
+./script/build_and_run.sh
+```
 
-## Установка
-- Скачай `.dmg` из артефактов
-- Открой → перетащи `AniAnglia.app` в `/Applications`
-- Первый запуск: ПКМ по иконке → «Открыть» (т.к. подпись ad-hoc, Gatekeeper попросит подтверждение).
+Useful modes:
 
-## Связанные репозитории
-- iOS-версия: [deerbyy/AniAnglia](https://github.com/deerbyy/AniAnglia)
+```bash
+./script/build_and_run.sh --verify
+./script/build_and_run.sh --logs
+./script/build_and_run.sh --debug
+```
 
-## Статус (v0.1)
-- [x] Базовый каркас + сайдбар
-- [x] Главная (лента «Интересное»)
-- [x] Поиск релизов
-- [x] Экран релиза (постер, описание, видео-блоки, скриншоты)
-- [x] Плеер видео в WKWebView
-- [x] Просмотрщик скриншотов с навигацией
-- [x] Авторизация (login + password → Keychain)
-- [x] Закладки (5 категорий)
-- [x] Профиль + статистика
-- [x] Настройки
+SwiftPM can also compile the sources:
 
-Дальше: фильтры каталога, комментарии, история просмотров, эпизоды/серии, экспорт списка.
+```bash
+swift build
+```
+
+Unit tests are XCTest-based and should be run with full Xcode:
+
+```bash
+xcodebuild test -project AniAnglia.xcodeproj -scheme AniAnglia-macOS -destination 'platform=macOS'
+```
+
+## Install From CI Artifact
+
+Download `AniAnglia.dmg` from the GitHub Actions artifact, open it, and drag `AniAnglia.app` to Applications. Because the CI build uses ad-hoc signing, first launch may require `Ctrl` + click on the app, then `Open`.
+
+## Not Included In MVP
+
+- Mini-player window: the code keeps a `PlayerSession` abstraction, but the floating always-on-top window is left for a later release.
+- VK/Google OAuth: first version supports only login/password and anonymous mode.
+- Torrent downloads: intentionally excluded from the macOS MVP.
+- Full DTO coverage for all Anixart endpoints: only fields required by the implemented screens are modeled.

@@ -1,20 +1,9 @@
-## Xcode generated
-AniAnglia.xcodeproj/
-*.xcworkspace/
-xcuserdata/
+.DS_Store
+.build/
 DerivedData/
 build/
-artifacts/
-
-## macOS
-.DS_Store
-
-## Swift Package Manager
-.swiftpm/
-.build/
-Packages/
-Package.resolved
-
-## Misc
-*.swp
-*.bak
+dist/
+*.xcuserstate
+*.dmg
+*.app
+xcuserdata/
