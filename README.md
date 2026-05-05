@@ -11,6 +11,7 @@ Native macOS client for the Anixart anime catalog. The app is SwiftUI-first, tar
 - Login/password auth with token/profile id stored in Keychain.
 - Anonymous browsing mode by default.
 - Account-backed bookmark sync for all five Anixart watch lists: "Смотрю", "В планах", "Просмотрено", "Отложено", "Брошено".
+- Expanded Anixart account profile mapping: username/avatar, privacy flags, social links, list counts, favorites, watched episodes, comments, collections, videos, friends, rating score, and watched time.
 - Profile screen and settings for appearance, data cache, playback defaults, help, and rules.
 
 ## Screenshots

@@ -36,7 +36,7 @@ final class ProfileViewModel: ObservableObject {
         defer { isWorking = false }
         do {
             let resp = try await api.signIn(login: login, password: password)
-            guard resp.code == 0, let token = resp.profileToken?.token, let pid = resp.profile?.id else {
+            guard resp.code == 0, let token = resp.profileToken?.token, let pid = resp.profileId ?? resp.profileToken?.id ?? resp.profile?.id else {
                 errorMessage = readableSignInError(code: resp.code, fallback: resp.message)
                 return
             }
@@ -88,6 +88,7 @@ struct ProfileView: View {
                 profileHeader
                 if let profile = vm.profile {
                     statsGrid(for: profile)
+                    accountDetails(for: profile)
                 }
                 Divider()
                 bookmarkSections
@@ -108,8 +109,23 @@ struct ProfileView: View {
             .overlay(Circle().stroke(Color.secondary.opacity(0.2), lineWidth: 1))
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(vm.profile?.login ?? "—")
+                Text(vm.profile?.displayName ?? "—")
                     .font(.system(size: 26, weight: .bold))
+                HStack(spacing: 8) {
+                    if vm.profile?.isOnline == true {
+                        Label("Онлайн", systemImage: "circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    if vm.profile?.isVerified == true {
+                        Label("Верифицирован", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(.blue)
+                    }
+                    if vm.profile?.isSponsor == true {
+                        Label("Sponsor", systemImage: "star.circle.fill")
+                            .foregroundStyle(.yellow)
+                    }
+                }
+                .font(.caption)
                 if let status = vm.profile?.status, !status.isEmpty {
                     Text(status)
                         .font(.callout)
@@ -183,6 +199,72 @@ struct ProfileView: View {
                 .help("Открыть «\(category.title)»")
             }
         }
+    }
+
+    private func accountDetails(for profile: Profile) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if profile.isStatsHidden == true || profile.isCountsHidden == true {
+                Label("Часть статистики скрыта настройками приватности Anixart.", systemImage: "eye.slash")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], alignment: .leading, spacing: 12) {
+                accountMetric("Избранное", profile.favoriteCount, "star")
+                accountMetric("Эпизоды", profile.watchedEpisodeCount, "play.rectangle")
+                accountMetric("Комментарии", profile.commentCount, "text.bubble")
+                accountMetric("Коллекции", profile.collectionCount, "rectangle.stack")
+                accountMetric("Видео", profile.videoCount, "film")
+                accountMetric("Друзья", profile.friendCount, "person.2")
+                accountMetric("Рейтинг", profile.ratingScore, "chart.line.uptrend.xyaxis")
+                if let watchedTime = profile.watchedTimeText {
+                    accountMetric("Время просмотра", watchedTime, "clock")
+                }
+            }
+
+            if !profile.socialLinks.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Соцсети")
+                        .font(.headline)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(profile.socialLinks, id: \.title) { item in
+                                Text("\(item.title): \(item.value)")
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 5)
+                                    .background(Color.secondary.opacity(0.1))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func accountMetric(_ title: String, _ value: Int?, _ icon: String) -> some View {
+        accountMetric(title, value.map(String.init), icon)
+    }
+
+    private func accountMetric(_ title: String, _ value: String?, _ icon: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value ?? "—")
+                    .font(.headline.monospacedDigit())
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     @ViewBuilder
