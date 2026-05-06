@@ -17,6 +17,8 @@ struct ContentView: View {
                         HomeView()
                     case .catalog:
                         CatalogView()
+                    case .collections:
+                        CollectionsView()
                     case .search:
                         SearchView()
                     case .bookmarks:
@@ -29,6 +31,9 @@ struct ContentView: View {
                 }
                 .navigationDestination(for: Release.self) { release in
                     ReleaseDetailView(releaseId: release.id, prefetched: release)
+                }
+                .navigationDestination(for: AnixartCollection.self) { collection in
+                    CollectionDetailView(collectionId: collection.id, prefetched: collection)
                 }
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {

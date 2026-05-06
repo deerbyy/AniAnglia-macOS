@@ -4,12 +4,14 @@ import Foundation
 final class BookmarkSyncStore: ObservableObject {
     @Published private(set) var releasesByCategory: [BookmarkCategory: [Release]] = [:]
     @Published private(set) var favoriteReleases: [Release] = []
+    @Published private(set) var favoriteCollections: [AnixartCollection] = []
     @Published private(set) var isSyncing = false
     @Published private(set) var lastSyncedAt: Date?
     @Published var errorMessage: String?
 
     private var categorySyncTasks: [BookmarkCategory: Task<Void, Never>] = [:]
     private var favoritesSyncTask: Task<Void, Never>?
+    private var favoriteCollectionsSyncTask: Task<Void, Never>?
 
     var allReleases: [Release] {
         var seen = Set<Int64>()
@@ -33,13 +35,20 @@ final class BookmarkSyncStore: ObservableObject {
         favoriteReleases.count
     }
 
+    var favoriteCollectionsCount: Int {
+        favoriteCollections.count
+    }
+
     func clear() {
         categorySyncTasks.values.forEach { $0.cancel() }
         categorySyncTasks = [:]
         favoritesSyncTask?.cancel()
         favoritesSyncTask = nil
+        favoriteCollectionsSyncTask?.cancel()
+        favoriteCollectionsSyncTask = nil
         releasesByCategory = [:]
         favoriteReleases = []
+        favoriteCollections = []
         errorMessage = nil
         lastSyncedAt = nil
         isSyncing = false
@@ -61,6 +70,7 @@ final class BookmarkSyncStore: ObservableObject {
         do {
             var snapshot: [BookmarkCategory: [Release]] = [:]
             favoriteReleases = try await fetchAllFavoritePages(api: api)
+            favoriteCollections = try await fetchAllFavoriteCollectionPages(api: api)
             for category in BookmarkCategory.displayOrder {
                 snapshot[category] = try await fetchAllPages(api: api, category: category)
             }
@@ -96,6 +106,34 @@ final class BookmarkSyncStore: ObservableObject {
             self.favoritesSyncTask = nil
         }
         favoritesSyncTask = task
+        await task.value
+    }
+
+    func syncFavoriteCollections(api: AnixartAPI, force: Bool = false) async {
+        guard api.auth.isAuthenticated else {
+            clear()
+            return
+        }
+        if !force, !favoriteCollections.isEmpty {
+            return
+        }
+
+        favoriteCollectionsSyncTask?.cancel()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let collections = try await self.fetchAllFavoriteCollectionPages(api: api)
+                guard !Task.isCancelled else { return }
+                self.favoriteCollections = collections
+                self.lastSyncedAt = Date()
+                self.errorMessage = nil
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.errorMessage = error.localizedDescription
+            }
+            self.favoriteCollectionsSyncTask = nil
+        }
+        favoriteCollectionsSyncTask = task
         await task.value
     }
 
@@ -165,6 +203,21 @@ final class BookmarkSyncStore: ObservableObject {
         await syncFavorites(api: api, force: true)
     }
 
+    func setFavoriteCollection(api: AnixartAPI, collection: AnixartCollection, isFavorite: Bool) async throws {
+        if collection.isFavorite == isFavorite {
+            applySyncedFavoriteCollection(collection: collection, isFavorite: isFavorite)
+            return
+        }
+
+        if isFavorite {
+            try await api.addCollectionToFavorites(collectionId: collection.id)
+        } else {
+            try await api.removeCollectionFromFavorites(collectionId: collection.id)
+        }
+        applySyncedFavoriteCollection(collection: collection, isFavorite: isFavorite)
+        await syncFavoriteCollections(api: api, force: true)
+    }
+
     private func applySyncedStatus(release: Release, category: BookmarkCategory?) {
         for existingCategory in BookmarkCategory.allCases {
             releasesByCategory[existingCategory] = releases(for: existingCategory).filter { $0.id != release.id }
@@ -174,6 +227,14 @@ final class BookmarkSyncStore: ObservableObject {
             var releases = releases(for: category)
             releases.insert(syncedRelease, at: 0)
             releasesByCategory[category] = deduplicated(releases)
+        }
+        lastSyncedAt = Date()
+    }
+
+    private func applySyncedFavoriteCollection(collection: AnixartCollection, isFavorite: Bool) {
+        favoriteCollections = favoriteCollections.filter { $0.id != collection.id }
+        if isFavorite {
+            favoriteCollections.insert(collection.withFavorite(true), at: 0)
         }
         lastSyncedAt = Date()
     }
@@ -214,6 +275,28 @@ final class BookmarkSyncStore: ObservableObject {
         return deduplicated(all)
     }
 
+    private func fetchAllFavoriteCollectionPages(api: AnixartAPI) async throws -> [AnixartCollection] {
+        var page = 0
+        var all: [AnixartCollection] = []
+
+        while true {
+            let response = try await api.favoriteCollections(page: page)
+            let pageItems = response.items.map { $0.withFavorite(true) }
+            all.append(contentsOf: pageItems)
+
+            if let totalPageCount = response.totalPageCount {
+                if page + 1 >= totalPageCount { break }
+            } else if pageItems.isEmpty {
+                break
+            }
+
+            page += 1
+            if page > 200 { break }
+        }
+
+        return deduplicatedCollections(all)
+    }
+
     private func fetchAllPages(api: AnixartAPI, category: BookmarkCategory) async throws -> [Release] {
         var page = 0
         var all: [Release] = []
@@ -240,6 +323,13 @@ final class BookmarkSyncStore: ObservableObject {
         var seen = Set<Int64>()
         return releases.filter { release in
             seen.insert(release.id).inserted
+        }
+    }
+
+    private func deduplicatedCollections(_ collections: [AnixartCollection]) -> [AnixartCollection] {
+        var seen = Set<Int64>()
+        return collections.filter { collection in
+            seen.insert(collection.id).inserted
         }
     }
 }

@@ -6,6 +6,7 @@ final class HomeViewModel: ObservableObject {
     @Published var recommendations: [Release] = []
     @Published var discussing: [Release] = []
     @Published var commentsWeek: [ReleaseComment] = []
+    @Published var weekCollections: [AnixartCollection] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
 
@@ -27,6 +28,11 @@ final class HomeViewModel: ObservableObject {
             self.commentsWeek = commentsResp.content
         } else {
             self.commentsWeek = []
+        }
+        if let collectionsResp = try? await api.discoverWeekCollections(page: 0) {
+            self.weekCollections = collectionsResp.items
+        } else {
+            self.weekCollections = []
         }
         // Personal recommendations only when authed (don't fail the whole load if this fails).
         if api.auth.isAuthenticated {
@@ -64,6 +70,9 @@ struct HomeView: View {
                         section(title: "Обсуждают", releases: vm.discussing)
                     }
                     section(title: "Сейчас смотрят", releases: vm.watching)
+                    if !vm.weekCollections.isEmpty {
+                        collectionsSection
+                    }
                     if !vm.commentsWeek.isEmpty {
                         commentsSection
                     }
@@ -128,6 +137,30 @@ struct HomeView: View {
                         .buttonStyle(.plain)
                     } else {
                         WeeklyCommentRow(comment: comment)
+                    }
+                }
+            }
+        }
+    }
+
+    private var collectionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Коллекции недели")
+                    .font(.title3.bold())
+                Spacer()
+                Button("Все") {
+                    appState.selectedSidebar = .collections
+                }
+                .buttonStyle(.borderless)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 16) {
+                    ForEach(vm.weekCollections) { collection in
+                        NavigationLink(value: collection) {
+                            CollectionCard(collection: collection, style: .compact)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }

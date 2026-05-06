@@ -4,13 +4,14 @@ Native macOS client for the Anixart anime catalog. The app is SwiftUI-first, tar
 
 ## Features
 
-- Home screen with "Рекомендации", "Обсуждают", "Сейчас смотрят", and "Комментарии недели" sections.
+- Home screen with "Рекомендации", "Обсуждают", "Сейчас смотрят", "Коллекции недели", and "Комментарии недели" sections.
 - Debounced search with pagination and genre/year/type filters.
-- Release detail page with poster zoom, metadata, genres, expandable description, episodes, screenshots, video blocks, comments, and bookmark actions.
+- Release detail page with poster zoom, metadata, genres, expandable description, episodes, screenshots, related collections, video blocks, comments, and bookmark actions.
+- Public collections browser with collection detail pages, release lists, and account-synced favorite collections.
 - Episode and trailer playback through `WKWebView` embed players.
 - Login/password auth with token/profile id stored in Keychain.
 - Anonymous browsing mode by default.
-- Account-backed bookmark sync for Anixart favorites plus all five watch lists: "Смотрю", "В планах", "Просмотрено", "Отложено", "Брошено".
+- Account-backed bookmark sync for Anixart favorites, favorite collections, and all five watch lists: "Смотрю", "В планах", "Просмотрено", "Отложено", "Брошено".
 - Expanded Anixart account profile mapping: username/avatar, privacy flags, social links, list counts, favorites, watched episodes, comments, collections, videos, friends, rating score, and watched time.
 - Profile screen and settings for appearance, data cache, playback defaults, help, and rules.
 
@@ -25,6 +26,13 @@ Screenshots should be captured from the first full Xcode/CI run and added here w
 - `GET /discover/recommendations/{page}`
 - `POST /discover/discussing`
 - `POST /discover/comments`
+- `GET /collection/all/{page}`
+- `GET /collection/{collection_id}`
+- `GET /collection/{collection_id}/releases/{page}`
+- `GET /collection/all/release/{release_id}/{page}`
+- `GET /collectionFavorite/all/{page}`
+- `GET /collectionFavorite/add/{collection_id}`
+- `GET /collectionFavorite/delete/{collection_id}`
 - `GET /release/random`
 - `POST /search/releases/{page}`
 - `GET /filter/0`

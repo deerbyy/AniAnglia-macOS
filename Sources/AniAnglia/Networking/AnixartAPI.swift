@@ -47,10 +47,7 @@ final class AnixartAPI {
     func get<T: Decodable>(_ path: String, query: [URLQueryItem] = [], as type: T.Type = T.self) async throws -> T {
         var components = URLComponents(url: Self.baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
         var items = query
-        if let token = auth.token, let pid = auth.profileId {
-            items.append(URLQueryItem(name: "token", value: token))
-            items.append(URLQueryItem(name: "profile_id", value: String(pid)))
-        }
+        items.append(contentsOf: authenticatedQueryItems())
         if !items.isEmpty { components.queryItems = items }
         guard let url = components.url else { throw APIError.empty }
         var req = URLRequest(url: url)
@@ -60,11 +57,7 @@ final class AnixartAPI {
 
     func post<T: Decodable>(_ path: String, form: [String: String] = [:], as type: T.Type = T.self) async throws -> T {
         var components = URLComponents(url: Self.baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
-        var items: [URLQueryItem] = []
-        if let token = auth.token, let pid = auth.profileId {
-            items.append(URLQueryItem(name: "token", value: token))
-            items.append(URLQueryItem(name: "profile_id", value: String(pid)))
-        }
+        let items = authenticatedQueryItems()
         if !items.isEmpty { components.queryItems = items }
         guard let url = components.url else { throw APIError.empty }
         var req = URLRequest(url: url)
@@ -80,11 +73,7 @@ final class AnixartAPI {
     /// POST a JSON-encoded payload (for /filter/{page}, etc).
     func postJSON<T: Decodable>(_ path: String, body: [String: Any], as type: T.Type = T.self) async throws -> T {
         var components = URLComponents(url: Self.baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
-        var items: [URLQueryItem] = []
-        if let token = auth.token, let pid = auth.profileId {
-            items.append(URLQueryItem(name: "token", value: token))
-            items.append(URLQueryItem(name: "profile_id", value: String(pid)))
-        }
+        let items = authenticatedQueryItems()
         if !items.isEmpty { components.queryItems = items }
         guard let url = components.url else { throw APIError.empty }
         var req = URLRequest(url: url)
@@ -122,6 +111,16 @@ final class AnixartAPI {
         var allowed = CharacterSet.urlQueryAllowed
         allowed.remove(charactersIn: "&=+")
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    private func authenticatedQueryItems() -> [URLQueryItem] {
+        guard let token = auth.token, let pid = auth.profileId else { return [] }
+        let profileId = String(pid)
+        return [
+            URLQueryItem(name: "token", value: token),
+            URLQueryItem(name: "profile", value: profileId),
+            URLQueryItem(name: "profile_id", value: profileId)
+        ]
     }
 }
 

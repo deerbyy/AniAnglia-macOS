@@ -14,7 +14,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "AniAngliaMacOS",
-            path: "AniAnglia"
+            path: "Sources/AniAnglia"
         ),
         .testTarget(
             name: "AniAngliaMacOSTests",

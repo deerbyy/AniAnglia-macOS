@@ -214,6 +214,7 @@ struct ProfileView: View {
                 accountMetric("Эпизоды", profile.watchedEpisodeCount, "play.rectangle")
                 accountMetric("Комментарии", profile.commentCount, "text.bubble")
                 accountMetric("Коллекции", profile.collectionCount, "rectangle.stack")
+                accountMetric("Избр. коллекции", appState.bookmarkSync.favoriteCollectionsCount, "star.square")
                 accountMetric("Видео", profile.videoCount, "film")
                 accountMetric("Друзья", profile.friendCount, "person.2")
                 accountMetric("Рейтинг", profile.ratingScore, "chart.line.uptrend.xyaxis")
@@ -364,6 +365,39 @@ private struct ProfileBookmarkSections: View {
                                 NavigationLink(value: release) {
                                     ReleaseCard(release: release)
                                         .frame(width: 160)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.bottom, 4)
+                    }
+                }
+            }
+        }
+
+        let favoriteCollections = Array(syncStore.favoriteCollections.prefix(8))
+        if !favoriteCollections.isEmpty || isLoading {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Circle().fill(Color.yellow).frame(width: 10, height: 10)
+                    Text("Избранные коллекции").font(.title3.bold())
+                    Spacer()
+                    Button("Все →") {
+                        appState.selectSidebar(.bookmarks, librarySection: .favoriteCollections)
+                    }
+                    .buttonStyle(.borderless)
+                }
+                if favoriteCollections.isEmpty {
+                    Text("Список пуст")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .padding(.vertical, 8)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 14) {
+                            ForEach(favoriteCollections) { collection in
+                                NavigationLink(value: collection) {
+                                    CollectionCard(collection: collection, style: .compact)
                                 }
                                 .buttonStyle(.plain)
                             }

@@ -23,6 +23,11 @@ extension AnixartAPI {
         try await post("discover/comments")
     }
 
+    /// "Коллекции недели" from iOS Discover.
+    func discoverWeekCollections(page: Int = 0) async throws -> CollectionsResponse {
+        try await collections(page: page, scope: 2, sort: .weekPopular)
+    }
+
     // MARK: - Release
 
     func release(id: Int64) async throws -> Release {
@@ -97,6 +102,43 @@ extension AnixartAPI {
 
     func videoBlocks(releaseId: Int64) async throws -> VideoBlocksResponse {
         try await get("video/release/\(releaseId)")
+    }
+
+    // MARK: - Collections
+
+    /// Public Anixart collections. iOS uses `scope=1, sort=YearPopular` for the full collections screen.
+    func collections(page: Int = 0, scope: Int = 1, sort: CollectionSort = .yearPopular) async throws -> CollectionsResponse {
+        try await get("collection/all/\(page)", query: collectionPagingQuery(page: page, scope: scope, sort: sort))
+    }
+
+    func collection(id: Int64) async throws -> CollectionInfo {
+        let resp: CollectionResponse = try await get("collection/\(id)")
+        guard let info = resp.info else { throw APIError.server(code: resp.code, message: "Коллекция не найдена") }
+        return info
+    }
+
+    func collectionReleases(collectionId: Int64, page: Int = 0) async throws -> ReleasesResponse {
+        try await get("collection/\(collectionId)/releases/\(page)")
+    }
+
+    func releaseCollections(releaseId: Int64, page: Int = 0, sort: CollectionSort = .yearPopular) async throws -> CollectionsResponse {
+        try await get("collection/all/release/\(releaseId)/\(page)", query: [
+            URLQueryItem(name: "sort", value: String(sort.rawValue))
+        ])
+    }
+
+    func favoriteCollections(page: Int = 0) async throws -> CollectionsResponse {
+        try await get("collectionFavorite/all/\(page)")
+    }
+
+    @discardableResult
+    func addCollectionToFavorites(collectionId: Int64) async throws -> SimpleResponse {
+        try await get("collectionFavorite/add/\(collectionId)")
+    }
+
+    @discardableResult
+    func removeCollectionFromFavorites(collectionId: Int64) async throws -> SimpleResponse {
+        try await get("collectionFavorite/delete/\(collectionId)")
     }
 
     // MARK: - Bookmarks / Profile lists
@@ -247,6 +289,14 @@ extension AnixartAPI {
             "login": login,
             "password": password
         ])
+    }
+
+    private func collectionPagingQuery(page: Int, scope: Int, sort: CollectionSort) -> [URLQueryItem] {
+        [
+            URLQueryItem(name: "previous_page", value: String(max(0, page - 1))),
+            URLQueryItem(name: "where", value: String(scope)),
+            URLQueryItem(name: "sort", value: String(sort.rawValue))
+        ]
     }
 }
 

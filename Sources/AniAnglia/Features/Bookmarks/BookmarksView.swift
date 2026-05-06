@@ -28,14 +28,25 @@ struct BookmarksView: View {
             switch vm.section {
             case .favorites:
                 await appState.bookmarkSync.syncFavorites(api: appState.api)
+            case .favoriteCollections:
+                await appState.bookmarkSync.syncFavoriteCollections(api: appState.api)
             case .list(let category):
                 await appState.bookmarkSync.syncCategory(api: appState.api, category: category)
             }
         }
         .onAppear {
-            if let pending = appState.pendingBookmarkCategory {
+            if let pending = appState.pendingLibrarySection {
+                vm.section = pending
+                appState.pendingLibrarySection = nil
+            } else if let pending = appState.pendingBookmarkCategory {
                 vm.select(categoryId: pending)
                 appState.pendingBookmarkCategory = nil
+            }
+        }
+        .onChange(of: appState.pendingLibrarySection) { newValue in
+            if let pending = newValue {
+                vm.section = pending
+                appState.pendingLibrarySection = nil
             }
         }
         .onChange(of: appState.pendingBookmarkCategory) { newValue in
@@ -76,16 +87,28 @@ private struct BookmarksContent: View {
                     .padding(.horizontal, 40)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if syncStore.isSyncing && releases.isEmpty {
+        } else if syncStore.isSyncing && releases.isEmpty && collections.isEmpty {
             ProgressView().padding(40).frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let error = syncStore.errorMessage, releases.isEmpty {
+        } else if let error = syncStore.errorMessage, releases.isEmpty && collections.isEmpty {
             ErrorState(message: error) {
                 Task { await reloadCurrentSection(force: true) }
             }
-        } else if releases.isEmpty {
+        } else if releases.isEmpty && collections.isEmpty {
             Text("Список пуст")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if section == .favoriteCollections {
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16)], alignment: .leading, spacing: 22) {
+                    ForEach(collections) { collection in
+                        NavigationLink(value: collection) {
+                            CollectionCard(collection: collection)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding()
+            }
         } else {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 16)], alignment: .leading, spacing: 20) {
@@ -136,8 +159,19 @@ private struct BookmarksContent: View {
         switch section {
         case .favorites:
             return syncStore.favoriteReleases
+        case .favoriteCollections:
+            return []
         case .list(let category):
             return syncStore.releases(for: category)
+        }
+    }
+
+    private var collections: [AnixartCollection] {
+        switch section {
+        case .favoriteCollections:
+            return syncStore.favoriteCollections
+        case .favorites, .list(_):
+            return []
         }
     }
 
@@ -145,6 +179,8 @@ private struct BookmarksContent: View {
         switch section {
         case .favorites:
             await syncStore.syncFavorites(api: appState.api, force: force)
+        case .favoriteCollections:
+            await syncStore.syncFavoriteCollections(api: appState.api, force: force)
         case .list(let category):
             await syncStore.syncCategory(api: appState.api, category: category, force: force)
         }

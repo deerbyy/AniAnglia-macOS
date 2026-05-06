@@ -4,6 +4,7 @@ import SwiftUI
 final class ReleaseDetailViewModel: ObservableObject {
     @Published var release: Release?
     @Published var videoBlocks: [VideoBlock] = []
+    @Published var relatedCollections: [AnixartCollection] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var bookmarkCategory: Int? = nil // 0 = none, 1..5 = list category
@@ -24,6 +25,10 @@ final class ReleaseDetailViewModel: ObservableObject {
             do { return try await api.videoBlocks(releaseId: releaseId).blocks }
             catch { return [] }
         }()
+        let loadedCollections: [AnixartCollection] = await {
+            do { return try await api.releaseCollections(releaseId: releaseId, page: 0, sort: .yearPopular).items }
+            catch { return [] }
+        }()
         if let loadedRelease {
             release = loadedRelease
             bookmarkCategory = loadedRelease.profileListStatus
@@ -31,6 +36,7 @@ final class ReleaseDetailViewModel: ObservableObject {
             userVote = loadedRelease.yourVote ?? 0
         }
         videoBlocks = loadedBlocks
+        relatedCollections = loadedCollections
         if release == nil && errorMessage == nil {
             errorMessage = "Не удалось загрузить релиз"
         }
@@ -100,6 +106,9 @@ struct ReleaseDetailView: View {
                     info(for: release)
                     if !vm.videoBlocks.isEmpty {
                         videosSection
+                    }
+                    if !vm.relatedCollections.isEmpty {
+                        relatedCollectionsSection
                     }
                     if !release.screenshots.isEmpty {
                         screenshotsSection(urls: release.screenshots)
@@ -347,6 +356,22 @@ struct ReleaseDetailView: View {
                                 .buttonStyle(.plain)
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    private var relatedCollectionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("В коллекциях").font(.title3.bold())
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(vm.relatedCollections) { collection in
+                        NavigationLink(value: collection) {
+                            CollectionCard(collection: collection, style: .compact)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }

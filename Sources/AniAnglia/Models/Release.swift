@@ -215,11 +215,13 @@ enum BookmarkCategory: Int, CaseIterable, Identifiable, Hashable {
 
 enum AccountLibrarySection: Hashable, Identifiable {
     case favorites
+    case favoriteCollections
     case list(BookmarkCategory)
 
     var id: String {
         switch self {
         case .favorites: return "favorites"
+        case .favoriteCollections: return "favorite-collections"
         case .list(let category): return "list-\(category.rawValue)"
         }
     }
@@ -227,11 +229,12 @@ enum AccountLibrarySection: Hashable, Identifiable {
     var title: String {
         switch self {
         case .favorites: return "Избранное"
+        case .favoriteCollections: return "Коллекции"
         case .list(let category): return category.title
         }
     }
 
-    static let displayOrder: [AccountLibrarySection] = [.favorites] + BookmarkCategory.displayOrder.map(AccountLibrarySection.list)
+    static let displayOrder: [AccountLibrarySection] = [.favorites, .favoriteCollections] + BookmarkCategory.displayOrder.map(AccountLibrarySection.list)
 }
 
 struct NamedItem: Codable, Hashable {
