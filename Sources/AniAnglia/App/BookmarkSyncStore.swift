@@ -7,6 +7,7 @@ final class BookmarkSyncStore: ObservableObject {
     @Published private(set) var favoriteCollections: [AnixartCollection] = []
     @Published private(set) var isSyncing = false
     @Published private(set) var lastSyncedAt: Date?
+    @Published private(set) var currentReleaseSort: ProfileListSort = .dateAddedNewest
     @Published var errorMessage: String?
 
     private var categorySyncTasks: [BookmarkCategory: Task<Void, Never>] = [:]
@@ -54,12 +55,13 @@ final class BookmarkSyncStore: ObservableObject {
         isSyncing = false
     }
 
-    func syncAll(api: AnixartAPI, force: Bool = false) async {
+    func syncAll(api: AnixartAPI, sort: ProfileListSort = .dateAddedNewest, force: Bool = false) async {
         guard api.auth.isAuthenticated else {
             clear()
             return
         }
-        if !force, lastSyncedAt != nil, !releasesByCategory.isEmpty {
+        let sortChanged = applyReleaseSort(sort)
+        if !force, !sortChanged, lastSyncedAt != nil, !releasesByCategory.isEmpty {
             return
         }
 
@@ -69,10 +71,10 @@ final class BookmarkSyncStore: ObservableObject {
 
         do {
             var snapshot: [BookmarkCategory: [Release]] = [:]
-            favoriteReleases = try await fetchAllFavoritePages(api: api)
+            favoriteReleases = try await fetchAllFavoritePages(api: api, sort: sort)
             favoriteCollections = try await fetchAllFavoriteCollectionPages(api: api)
             for category in BookmarkCategory.displayOrder {
-                snapshot[category] = try await fetchAllPages(api: api, category: category)
+                snapshot[category] = try await fetchAllPages(api: api, category: category, sort: sort)
             }
             releasesByCategory = snapshot
             lastSyncedAt = Date()
@@ -81,12 +83,13 @@ final class BookmarkSyncStore: ObservableObject {
         }
     }
 
-    func syncFavorites(api: AnixartAPI, force: Bool = false) async {
+    func syncFavorites(api: AnixartAPI, sort: ProfileListSort = .dateAddedNewest, force: Bool = false) async {
         guard api.auth.isAuthenticated else {
             clear()
             return
         }
-        if !force, !favoriteReleases.isEmpty {
+        let sortChanged = applyReleaseSort(sort)
+        if !force, !sortChanged, !favoriteReleases.isEmpty {
             return
         }
 
@@ -94,7 +97,7 @@ final class BookmarkSyncStore: ObservableObject {
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                let releases = try await self.fetchAllFavoritePages(api: api)
+                let releases = try await self.fetchAllFavoritePages(api: api, sort: sort)
                 guard !Task.isCancelled else { return }
                 self.favoriteReleases = releases
                 self.lastSyncedAt = Date()
@@ -137,12 +140,13 @@ final class BookmarkSyncStore: ObservableObject {
         await task.value
     }
 
-    func syncCategory(api: AnixartAPI, category: BookmarkCategory, force: Bool = false) async {
+    func syncCategory(api: AnixartAPI, category: BookmarkCategory, sort: ProfileListSort = .dateAddedNewest, force: Bool = false) async {
         guard api.auth.isAuthenticated else {
             clear()
             return
         }
-        if !force, releasesByCategory[category] != nil {
+        let sortChanged = applyReleaseSort(sort)
+        if !force, !sortChanged, releasesByCategory[category] != nil {
             return
         }
 
@@ -150,7 +154,7 @@ final class BookmarkSyncStore: ObservableObject {
         let task = Task { [weak self] in
             guard let self else { return }
             do {
-                let releases = try await self.fetchAllPages(api: api, category: category)
+                let releases = try await self.fetchAllPages(api: api, category: category, sort: sort)
                 guard !Task.isCancelled else { return }
                 self.releasesByCategory[category] = releases
                 self.lastSyncedAt = Date()
@@ -168,7 +172,6 @@ final class BookmarkSyncStore: ObservableObject {
     func setStatus(api: AnixartAPI, release: Release, category: BookmarkCategory?) async throws {
         let currentCategory = release.profileListStatus.flatMap(BookmarkCategory.init(rawValue:))
         if category == currentCategory {
-            applySyncedStatus(release: release, category: category)
             return
         }
 
@@ -182,15 +185,14 @@ final class BookmarkSyncStore: ObservableObject {
         applySyncedStatus(release: release, category: category)
 
         if let category {
-            await syncCategory(api: api, category: category, force: true)
+            await syncCategory(api: api, category: category, sort: currentReleaseSort, force: true)
         } else if let currentCategory {
-            await syncCategory(api: api, category: currentCategory, force: true)
+            await syncCategory(api: api, category: currentCategory, sort: currentReleaseSort, force: true)
         }
     }
 
     func setFavorite(api: AnixartAPI, release: Release, isFavorite: Bool) async throws {
         if release.isFavorite == isFavorite {
-            applySyncedFavorite(release: release, isFavorite: isFavorite)
             return
         }
 
@@ -200,7 +202,7 @@ final class BookmarkSyncStore: ObservableObject {
             try await api.removeFromFavorites(releaseId: release.id)
         }
         applySyncedFavorite(release: release, isFavorite: isFavorite)
-        await syncFavorites(api: api, force: true)
+        await syncFavorites(api: api, sort: currentReleaseSort, force: true)
     }
 
     func setFavoriteCollection(api: AnixartAPI, collection: AnixartCollection, isFavorite: Bool) async throws {
@@ -223,10 +225,10 @@ final class BookmarkSyncStore: ObservableObject {
             releasesByCategory[existingCategory] = releases(for: existingCategory).filter { $0.id != release.id }
         }
         if let category {
-            let syncedRelease = release.withProfileListStatus(category.rawValue)
+            let syncedRelease = release.withProfileListStatus(category.rawValue, updatedAt: currentTimestamp())
             var releases = releases(for: category)
             releases.insert(syncedRelease, at: 0)
-            releasesByCategory[category] = deduplicated(releases)
+            releasesByCategory[category] = sortedListReleases(deduplicated(releases), category: category, sort: currentReleaseSort)
         }
         lastSyncedAt = Date()
     }
@@ -240,11 +242,12 @@ final class BookmarkSyncStore: ObservableObject {
     }
 
     private func applySyncedFavorite(release: Release, isFavorite: Bool) {
-        let syncedRelease = release.withFavorite(isFavorite)
+        let syncedRelease = release.withFavorite(isFavorite, updatedAt: currentTimestamp())
         favoriteReleases = favoriteReleases.filter { $0.id != release.id }
         if isFavorite {
             favoriteReleases.insert(syncedRelease, at: 0)
         }
+        favoriteReleases = sortedFavoriteReleases(deduplicated(favoriteReleases), sort: currentReleaseSort)
         for category in BookmarkCategory.allCases {
             releasesByCategory[category] = releases(for: category).map { existing in
                 existing.id == release.id ? existing.withFavorite(isFavorite) : existing
@@ -253,12 +256,12 @@ final class BookmarkSyncStore: ObservableObject {
         lastSyncedAt = Date()
     }
 
-    private func fetchAllFavoritePages(api: AnixartAPI) async throws -> [Release] {
+    private func fetchAllFavoritePages(api: AnixartAPI, sort: ProfileListSort) async throws -> [Release] {
         var page = 0
         var all: [Release] = []
 
         while true {
-            let response = try await api.favorites(page: page)
+            let response = try await api.favorites(page: page, sort: sort)
             let pageItems = response.items.map { $0.withFavorite(true) }
             all.append(contentsOf: pageItems)
 
@@ -272,7 +275,7 @@ final class BookmarkSyncStore: ObservableObject {
             if page > 200 { break }
         }
 
-        return deduplicated(all)
+        return sortedFavoriteReleases(deduplicated(all), sort: sort)
     }
 
     private func fetchAllFavoriteCollectionPages(api: AnixartAPI) async throws -> [AnixartCollection] {
@@ -297,12 +300,12 @@ final class BookmarkSyncStore: ObservableObject {
         return deduplicatedCollections(all)
     }
 
-    private func fetchAllPages(api: AnixartAPI, category: BookmarkCategory) async throws -> [Release] {
+    private func fetchAllPages(api: AnixartAPI, category: BookmarkCategory, sort: ProfileListSort) async throws -> [Release] {
         var page = 0
         var all: [Release] = []
 
         while true {
-            let response = try await api.bookmarks(category: category, page: page)
+            let response = try await api.bookmarks(category: category, page: page, sort: sort)
             let pageItems = response.items.map { $0.withProfileListStatus(category.rawValue) }
             all.append(contentsOf: pageItems)
 
@@ -316,7 +319,7 @@ final class BookmarkSyncStore: ObservableObject {
             if page > 200 { break }
         }
 
-        return deduplicated(all)
+        return sortedListReleases(deduplicated(all), category: category, sort: sort)
     }
 
     private func deduplicated(_ releases: [Release]) -> [Release] {
@@ -331,5 +334,49 @@ final class BookmarkSyncStore: ObservableObject {
         return collections.filter { collection in
             seen.insert(collection.id).inserted
         }
+    }
+
+    @discardableResult
+    private func applyReleaseSort(_ sort: ProfileListSort) -> Bool {
+        guard sort != currentReleaseSort else { return false }
+        currentReleaseSort = sort
+        releasesByCategory = [:]
+        favoriteReleases = []
+        return true
+    }
+
+    private func sortedFavoriteReleases(_ releases: [Release], sort: ProfileListSort) -> [Release] {
+        guard sort.isDateAddedSort else { return releases }
+        return stableSorted(releases, newestFirst: sort.newestFirst) { release in
+            release.favoriteAddedDate
+        }
+    }
+
+    private func sortedListReleases(_ releases: [Release], category: BookmarkCategory, sort: ProfileListSort) -> [Release] {
+        guard sort.isDateAddedSort else { return releases }
+        return stableSorted(releases, newestFirst: sort.newestFirst) { release in
+            release.listAddedDate(for: category)
+        }
+    }
+
+    private func stableSorted(_ releases: [Release], newestFirst: Bool, date: (Release) -> Int64?) -> [Release] {
+        releases.enumerated().sorted { lhs, rhs in
+            let lhsDate = date(lhs.element)
+            let rhsDate = date(rhs.element)
+            switch (lhsDate, rhsDate) {
+            case let (lhsDate?, rhsDate?) where lhsDate != rhsDate:
+                return newestFirst ? lhsDate > rhsDate : lhsDate < rhsDate
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
+    }
+
+    private func currentTimestamp() -> Int64 {
+        Int64(Date().timeIntervalSince1970)
     }
 }

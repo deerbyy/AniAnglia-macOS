@@ -23,6 +23,14 @@ struct Release: Codable, Identifiable, Hashable {
     let profileListStatus: Int?
     let voteCount: Int?
     let yourVote: Int?
+    let lastSetFavoriteDate: Int64?
+    let lastSetWatchingDate: Int64?
+    let lastSetPlanDate: Int64?
+    let lastSetViewedDate: Int64?
+    let lastSetCompletedDate: Int64?
+    let lastSetHoldOnDate: Int64?
+    let lastSetDroppedDate: Int64?
+    let lastViewDate: Int64?
 
     var displayTitle: String {
         titleRu ?? titleOriginal ?? titleAlt ?? "Без названия"
@@ -58,7 +66,15 @@ struct Release: Codable, Identifiable, Hashable {
         isFavorite: Bool?,
         profileListStatus: Int?,
         voteCount: Int?,
-        yourVote: Int?
+        yourVote: Int?,
+        lastSetFavoriteDate: Int64? = nil,
+        lastSetWatchingDate: Int64? = nil,
+        lastSetPlanDate: Int64? = nil,
+        lastSetViewedDate: Int64? = nil,
+        lastSetCompletedDate: Int64? = nil,
+        lastSetHoldOnDate: Int64? = nil,
+        lastSetDroppedDate: Int64? = nil,
+        lastViewDate: Int64? = nil
     ) {
         self.id = id
         self.titleRu = titleRu
@@ -82,6 +98,14 @@ struct Release: Codable, Identifiable, Hashable {
         self.profileListStatus = profileListStatus
         self.voteCount = voteCount
         self.yourVote = yourVote
+        self.lastSetFavoriteDate = lastSetFavoriteDate
+        self.lastSetWatchingDate = lastSetWatchingDate
+        self.lastSetPlanDate = lastSetPlanDate
+        self.lastSetViewedDate = lastSetViewedDate
+        self.lastSetCompletedDate = lastSetCompletedDate
+        self.lastSetHoldOnDate = lastSetHoldOnDate
+        self.lastSetDroppedDate = lastSetDroppedDate
+        self.lastViewDate = lastViewDate
     }
 
     init(from decoder: Decoder) throws {
@@ -108,6 +132,14 @@ struct Release: Codable, Identifiable, Hashable {
         profileListStatus = c.decodeInt("profile_list_status") ?? c.decodeInt("profileListStatus")
         voteCount = c.decodeInt("vote_count") ?? c.decodeInt("voteCount")
         yourVote = c.decodeInt("your_vote") ?? c.decodeInt("yourVote") ?? c.decodeInt("my_vote") ?? c.decodeInt("myVote")
+        lastSetFavoriteDate = c.decodeTimestamp("last_set_favorite_date") ?? c.decodeTimestamp("lastSetFavoriteDate")
+        lastSetWatchingDate = c.decodeTimestamp("last_set_watching_date") ?? c.decodeTimestamp("lastSetWatchingDate")
+        lastSetPlanDate = c.decodeTimestamp("last_set_plan_date") ?? c.decodeTimestamp("lastSetPlanDate")
+        lastSetViewedDate = c.decodeTimestamp("last_set_viewed_date") ?? c.decodeTimestamp("lastSetViewedDate")
+        lastSetCompletedDate = c.decodeTimestamp("last_set_completed_date") ?? c.decodeTimestamp("lastSetCompletedDate")
+        lastSetHoldOnDate = c.decodeTimestamp("last_set_hold_on_date") ?? c.decodeTimestamp("lastSetHoldOnDate")
+        lastSetDroppedDate = c.decodeTimestamp("last_set_dropped_date") ?? c.decodeTimestamp("lastSetDroppedDate")
+        lastViewDate = c.decodeTimestamp("last_view_date") ?? c.decodeTimestamp("lastViewDate")
     }
 
     func encode(to encoder: Encoder) throws {
@@ -134,10 +166,19 @@ struct Release: Codable, Identifiable, Hashable {
         try c.encodeIfPresent(profileListStatus, forKey: "profile_list_status")
         try c.encodeIfPresent(voteCount, forKey: "vote_count")
         try c.encodeIfPresent(yourVote, forKey: "your_vote")
+        try c.encodeIfPresent(lastSetFavoriteDate, forKey: "last_set_favorite_date")
+        try c.encodeIfPresent(lastSetWatchingDate, forKey: "last_set_watching_date")
+        try c.encodeIfPresent(lastSetPlanDate, forKey: "last_set_plan_date")
+        try c.encodeIfPresent(lastSetViewedDate, forKey: "last_set_viewed_date")
+        try c.encodeIfPresent(lastSetCompletedDate, forKey: "last_set_completed_date")
+        try c.encodeIfPresent(lastSetHoldOnDate, forKey: "last_set_hold_on_date")
+        try c.encodeIfPresent(lastSetDroppedDate, forKey: "last_set_dropped_date")
+        try c.encodeIfPresent(lastViewDate, forKey: "last_view_date")
     }
 
-    func withProfileListStatus(_ status: Int?) -> Release {
-        Release(
+    func withProfileListStatus(_ status: Int?, updatedAt: Int64? = nil) -> Release {
+        let targetCategory = status.flatMap(BookmarkCategory.init(rawValue:))
+        return Release(
             id: id,
             titleRu: titleRu,
             titleOriginal: titleOriginal,
@@ -159,11 +200,19 @@ struct Release: Codable, Identifiable, Hashable {
             isFavorite: isFavorite,
             profileListStatus: status,
             voteCount: voteCount,
-            yourVote: yourVote
+            yourVote: yourVote,
+            lastSetFavoriteDate: lastSetFavoriteDate,
+            lastSetWatchingDate: targetCategory == .watching ? updatedAt ?? lastSetWatchingDate : lastSetWatchingDate,
+            lastSetPlanDate: targetCategory == .planned ? updatedAt ?? lastSetPlanDate : lastSetPlanDate,
+            lastSetViewedDate: targetCategory == .watched ? updatedAt ?? lastSetViewedDate : lastSetViewedDate,
+            lastSetCompletedDate: targetCategory == .watched ? updatedAt ?? lastSetCompletedDate : lastSetCompletedDate,
+            lastSetHoldOnDate: targetCategory == .onHold ? updatedAt ?? lastSetHoldOnDate : lastSetHoldOnDate,
+            lastSetDroppedDate: targetCategory == .dropped ? updatedAt ?? lastSetDroppedDate : lastSetDroppedDate,
+            lastViewDate: lastViewDate
         )
     }
 
-    func withFavorite(_ favorite: Bool?) -> Release {
+    func withFavorite(_ favorite: Bool?, updatedAt: Int64? = nil) -> Release {
         Release(
             id: id,
             titleRu: titleRu,
@@ -186,8 +235,35 @@ struct Release: Codable, Identifiable, Hashable {
             isFavorite: favorite,
             profileListStatus: profileListStatus,
             voteCount: voteCount,
-            yourVote: yourVote
+            yourVote: yourVote,
+            lastSetFavoriteDate: favorite == true ? updatedAt ?? lastSetFavoriteDate : lastSetFavoriteDate,
+            lastSetWatchingDate: lastSetWatchingDate,
+            lastSetPlanDate: lastSetPlanDate,
+            lastSetViewedDate: lastSetViewedDate,
+            lastSetCompletedDate: lastSetCompletedDate,
+            lastSetHoldOnDate: lastSetHoldOnDate,
+            lastSetDroppedDate: lastSetDroppedDate,
+            lastViewDate: lastViewDate
         )
+    }
+
+    var favoriteAddedDate: Int64? {
+        lastSetFavoriteDate
+    }
+
+    func listAddedDate(for category: BookmarkCategory) -> Int64? {
+        switch category {
+        case .watching:
+            return lastSetWatchingDate
+        case .planned:
+            return lastSetPlanDate
+        case .watched:
+            return lastSetViewedDate ?? lastSetCompletedDate
+        case .onHold:
+            return lastSetHoldOnDate
+        case .dropped:
+            return lastSetDroppedDate
+        }
     }
 }
 
@@ -235,6 +311,40 @@ enum AccountLibrarySection: Hashable, Identifiable {
     }
 
     static let displayOrder: [AccountLibrarySection] = [.favorites, .favoriteCollections] + BookmarkCategory.displayOrder.map(AccountLibrarySection.list)
+}
+
+enum ProfileListSort: Int, CaseIterable, Identifiable, Hashable {
+    case descending = 1
+    case ascending = 2
+    case releaseDescending = 3
+    case releaseAscending = 4
+    case titleDescending = 5
+    case titleAscending = 6
+
+    var id: Int { rawValue }
+
+    /// Matches the iOS AniAnglia default: `Profile::ListSort::Ascending`.
+    static let dateAddedNewest: ProfileListSort = .ascending
+    static let displayOrder: [ProfileListSort] = [.ascending, .descending, .releaseDescending, .releaseAscending, .titleAscending, .titleDescending]
+
+    var title: String {
+        switch self {
+        case .ascending: return "Сначала новые"
+        case .descending: return "Сначала старые"
+        case .releaseDescending: return "Дата выхода ↓"
+        case .releaseAscending: return "Дата выхода ↑"
+        case .titleAscending: return "Название А-Я"
+        case .titleDescending: return "Название Я-А"
+        }
+    }
+
+    var isDateAddedSort: Bool {
+        self == .ascending || self == .descending
+    }
+
+    var newestFirst: Bool {
+        self == .ascending
+    }
 }
 
 struct NamedItem: Codable, Hashable {
@@ -418,6 +528,34 @@ extension KeyedDecodingContainer where Key == ReleaseCodingKey {
             return NamedItem(id: Int(name), name: name)
         }
         return nil
+    }
+
+    func decodeTimestamp(_ key: String) -> Int64? {
+        if let value = decodeInt64(key) {
+            return normalizedTimestamp(value)
+        }
+        guard let value = decodeString(key), !value.isEmpty else { return nil }
+        if let double = Double(value.replacingOccurrences(of: ",", with: ".")) {
+            return normalizedTimestamp(Int64(double))
+        }
+        if let date = ISO8601DateFormatter().date(from: value) {
+            return Int64(date.timeIntervalSince1970)
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        if let date = formatter.date(from: value) {
+            return Int64(date.timeIntervalSince1970)
+        }
+        return nil
+    }
+
+    private func normalizedTimestamp(_ value: Int64) -> Int64 {
+        if value > 10_000_000_000 {
+            return value / 1_000
+        }
+        return value
     }
 }
 

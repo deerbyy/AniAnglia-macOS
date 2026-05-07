@@ -3,6 +3,7 @@ import SwiftUI
 @MainActor
 final class BookmarksViewModel: ObservableObject {
     @Published var section: AccountLibrarySection = .favorites
+    @Published var sort: ProfileListSort = .dateAddedNewest
 
     func select(categoryId: Int) {
         guard let next = BookmarkCategory(rawValue: categoryId) else { return }
@@ -18,20 +19,21 @@ struct BookmarksView: View {
         BookmarksContent(
             appState: appState,
             syncStore: appState.bookmarkSync,
-            section: $vm.section
+            section: $vm.section,
+            sort: $vm.sort
         )
         .navigationTitle("Закладки")
         .task(id: appState.auth.profileId) {
-            await appState.bookmarkSync.syncAll(api: appState.api)
+            await appState.bookmarkSync.syncAll(api: appState.api, sort: vm.sort)
         }
-        .task(id: vm.section) {
+        .task(id: "\(vm.section.id)-\(vm.sort.rawValue)") {
             switch vm.section {
             case .favorites:
-                await appState.bookmarkSync.syncFavorites(api: appState.api)
+                await appState.bookmarkSync.syncFavorites(api: appState.api, sort: vm.sort)
             case .favoriteCollections:
                 await appState.bookmarkSync.syncFavoriteCollections(api: appState.api)
             case .list(let category):
-                await appState.bookmarkSync.syncCategory(api: appState.api, category: category)
+                await appState.bookmarkSync.syncCategory(api: appState.api, category: category, sort: vm.sort)
             }
         }
         .onAppear {
@@ -62,6 +64,7 @@ private struct BookmarksContent: View {
     @ObservedObject var appState: AppState
     @ObservedObject var syncStore: BookmarkSyncStore
     @Binding var section: AccountLibrarySection
+    @Binding var sort: ProfileListSort
 
     private var sectionPicker: some View {
         Picker("", selection: $section) {
@@ -70,6 +73,18 @@ private struct BookmarksContent: View {
             }
         }
         .pickerStyle(.segmented)
+    }
+
+    private var sortPicker: some View {
+        Picker("Порядок", selection: $sort) {
+            ForEach(ProfileListSort.displayOrder) { item in
+                Text(item.title).tag(item)
+            }
+        }
+        .pickerStyle(.menu)
+        .controlSize(.small)
+        .disabled(section == .favoriteCollections)
+        .help("Порядок релизов в закладках Anixart")
     }
 
     @ViewBuilder
@@ -139,8 +154,9 @@ private struct BookmarksContent: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    sortPicker
                     Button {
-                        Task { await syncStore.syncAll(api: appState.api, force: true) }
+                        Task { await syncStore.syncAll(api: appState.api, sort: sort, force: true) }
                     } label: {
                         Label("Синхронизировать", systemImage: "arrow.triangle.2.circlepath")
                     }
@@ -178,11 +194,11 @@ private struct BookmarksContent: View {
     private func reloadCurrentSection(force: Bool) async {
         switch section {
         case .favorites:
-            await syncStore.syncFavorites(api: appState.api, force: force)
+            await syncStore.syncFavorites(api: appState.api, sort: sort, force: force)
         case .favoriteCollections:
             await syncStore.syncFavoriteCollections(api: appState.api, force: force)
         case .list(let category):
-            await syncStore.syncCategory(api: appState.api, category: category, force: force)
+            await syncStore.syncCategory(api: appState.api, category: category, sort: sort, force: force)
         }
     }
 }

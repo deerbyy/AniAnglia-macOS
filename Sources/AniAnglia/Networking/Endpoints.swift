@@ -145,13 +145,15 @@ extension AnixartAPI {
 
     /// Список релизов в категории закладок (для текущего пользователя).
     /// Категория как в libanixart `Profile::ListStatus`: 1=Смотрю, 2=В планах, 3=Просмотрено, 4=Отложено, 5=Брошено.
-    func bookmarks(category: Int, page: Int = 0) async throws -> ReleasesResponse {
+    func bookmarks(category: Int, page: Int = 0, sort: ProfileListSort = .dateAddedNewest) async throws -> ReleasesResponse {
         guard let pid = auth.profileId else { throw APIError.server(code: 401, message: "Не авторизован") }
-        return try await get("profile/list/all/\(pid)/\(category)/\(page)")
+        return try await get("profile/list/all/\(pid)/\(category)/\(page)", query: [
+            URLQueryItem(name: "sort", value: String(sort.rawValue))
+        ])
     }
 
-    func bookmarks(category: BookmarkCategory, page: Int = 0) async throws -> ReleasesResponse {
-        try await bookmarks(category: category.rawValue, page: page)
+    func bookmarks(category: BookmarkCategory, page: Int = 0, sort: ProfileListSort = .dateAddedNewest) async throws -> ReleasesResponse {
+        try await bookmarks(category: category.rawValue, page: page, sort: sort)
     }
 
     /// Official Anixart list status mutation. This is the same account-backed
@@ -204,9 +206,9 @@ extension AnixartAPI {
     }
 
     /// Добавить/убрать в избранное (звёздочка, отдельно от 5 категорий).
-    func favorites(page: Int = 0, sort: Int = 2, filterAnnounce: Int = 0) async throws -> ReleasesResponse {
+    func favorites(page: Int = 0, sort: ProfileListSort = .dateAddedNewest, filterAnnounce: Int = 0) async throws -> ReleasesResponse {
         try await get("favorite/all/\(page)", query: [
-            URLQueryItem(name: "sort", value: String(sort)),
+            URLQueryItem(name: "sort", value: String(sort.rawValue)),
             URLQueryItem(name: "filter_announce", value: String(filterAnnounce))
         ])
     }
