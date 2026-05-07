@@ -32,24 +32,19 @@ final class CollectionDetailViewModel: ObservableObject {
         }
         defer { isLoading = false }
 
-        async let loadedInfo: CollectionInfo? = {
-            do { return try await api.collection(id: collectionId) }
-            catch { return nil }
-        }()
-        async let loadedReleases: ReleasesResponse? = {
-            do { return try await api.collectionReleases(collectionId: collectionId, page: 0) }
-            catch { return nil }
-        }()
-
-        let nextInfo = await loadedInfo
-        let releasesResponse = await loadedReleases
-
-        if let nextInfo {
+        do {
+            let nextInfo = try await api.collection(id: collectionId)
             info = nextInfo
             collection = nextInfo.collection
             isFavorite = nextInfo.collection.isFavorite ?? false
+        } catch {
+            if collection == nil {
+                errorMessage = error.localizedDescription
+            }
         }
-        if let releasesResponse {
+
+        do {
+            let releasesResponse = try await api.collectionReleases(collectionId: collectionId, page: 0)
             let pageItems = releasesResponse.items
             releases = deduplicated(pageItems.isEmpty ? releases : pageItems)
             totalPageCount = releasesResponse.totalPageCount
@@ -59,7 +54,12 @@ final class CollectionDetailViewModel: ObservableObject {
                 reachedEnd = pageItems.isEmpty
             }
             page = 1
+        } catch {
+            if collection == nil {
+                errorMessage = error.localizedDescription
+            }
         }
+
         if collection == nil {
             errorMessage = "Не удалось загрузить коллекцию"
         }
@@ -160,6 +160,8 @@ struct CollectionDetailView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 10))
 
                 LinearGradient(colors: [.black.opacity(0.58), .clear], startPoint: .bottom, endPoint: .top)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 250)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
 
                 VStack(alignment: .leading, spacing: 8) {

@@ -84,7 +84,7 @@ struct AnixartCollection: Codable, Identifiable, Hashable {
         creationDate = c.decodeInt64("creation_date") ?? c.decodeInt64("creationDate")
         releases = (try? c.decodeIfPresent([Release].self, forKey: "releases")) ?? []
         commentCount = c.decodeInt("comment_count") ?? c.decodeInt("commentCount")
-        favoriteCount = c.decodeInt("favorite_count") ?? c.decodeInt("favoriteCount")
+        favoriteCount = c.decodeInt("favorite_count") ?? c.decodeInt("favorites_count") ?? c.decodeInt("favoriteCount") ?? c.decodeInt("favoritesCount")
         isFavorite = c.decodeBool("is_favorite") ?? c.decodeBool("isFavorite")
         isPrivate = c.decodeBool("is_private") ?? c.decodeBool("isPrivate")
     }
@@ -119,6 +119,47 @@ struct AnixartCollection: Codable, Identifiable, Hashable {
             favoriteCount: favoriteCount,
             isFavorite: favorite,
             isPrivate: isPrivate
+        )
+    }
+
+    static func == (lhs: AnixartCollection, rhs: AnixartCollection) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
+struct CollectionRoute: Hashable, Identifiable {
+    let id: Int64
+    let title: String
+    let description: String?
+    let imageURLString: String?
+    let isFavorite: Bool?
+
+    init(_ collection: AnixartCollection) {
+        id = collection.id
+        title = collection.title
+        description = collection.description
+        imageURLString = collection.imageURLString
+        isFavorite = collection.isFavorite
+    }
+
+    var prefetchedCollection: AnixartCollection {
+        AnixartCollection(
+            id: id,
+            title: title,
+            description: description,
+            creator: nil,
+            imageURLString: imageURLString,
+            lastUpdateDate: nil,
+            creationDate: nil,
+            releases: [],
+            commentCount: nil,
+            favoriteCount: nil,
+            isFavorite: isFavorite,
+            isPrivate: nil
         )
     }
 }
@@ -159,7 +200,7 @@ struct CollectionResponse: Codable, CodedResponse {
         code = c.decodeInt("code") ?? 0
         message = c.decodeString("message")
         collection = try? c.decodeIfPresent(AnixartCollection.self, forKey: "collection")
-        watchedCount = c.decodeInt("watched_count") ?? c.decodeInt("watchedCount")
+        watchedCount = c.decodeInt("watched_count") ?? c.decodeInt("completed_count") ?? c.decodeInt("watchedCount") ?? c.decodeInt("completedCount")
         droppedCount = c.decodeInt("dropped_count") ?? c.decodeInt("droppedCount")
         holdOnCount = c.decodeInt("hold_on_count") ?? c.decodeInt("holdOnCount")
         planCount = c.decodeInt("plan_count") ?? c.decodeInt("planCount")

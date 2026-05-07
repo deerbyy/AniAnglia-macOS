@@ -32,8 +32,8 @@ struct ContentView: View {
                 .navigationDestination(for: Release.self) { release in
                     ReleaseDetailView(releaseId: release.id, prefetched: release)
                 }
-                .navigationDestination(for: AnixartCollection.self) { collection in
-                    CollectionDetailView(collectionId: collection.id, prefetched: collection)
+                .navigationDestination(for: CollectionRoute.self) { route in
+                    CollectionDetailView(collectionId: route.id, prefetched: route.prefetchedCollection)
                 }
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {

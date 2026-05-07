@@ -323,14 +323,14 @@ enum ProfileListSort: Int, CaseIterable, Identifiable, Hashable {
 
     var id: Int { rawValue }
 
-    /// Matches the iOS AniAnglia default: `Profile::ListSort::Ascending`.
-    static let dateAddedNewest: ProfileListSort = .ascending
-    static let displayOrder: [ProfileListSort] = [.ascending, .descending, .releaseDescending, .releaseAscending, .titleAscending, .titleDescending]
+    /// Anixart API value 1 returns the newest list/favorite additions first.
+    static let dateAddedNewest: ProfileListSort = .descending
+    static let displayOrder: [ProfileListSort] = [.descending, .ascending, .releaseDescending, .releaseAscending, .titleAscending, .titleDescending]
 
     var title: String {
         switch self {
-        case .ascending: return "Сначала новые"
-        case .descending: return "Сначала старые"
+        case .descending: return "Сначала новые"
+        case .ascending: return "Сначала старые"
         case .releaseDescending: return "Дата выхода ↓"
         case .releaseAscending: return "Дата выхода ↑"
         case .titleAscending: return "Название А-Я"
@@ -343,7 +343,7 @@ enum ProfileListSort: Int, CaseIterable, Identifiable, Hashable {
     }
 
     var newestFirst: Bool {
-        self == .ascending
+        self == .descending
     }
 }
 

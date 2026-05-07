@@ -368,7 +368,7 @@ struct ReleaseDetailView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 14) {
                     ForEach(vm.relatedCollections) { collection in
-                        NavigationLink(value: collection) {
+                        NavigationLink(value: CollectionRoute(collection)) {
                             CollectionCard(collection: collection, style: .compact)
                         }
                         .buttonStyle(.plain)

@@ -178,7 +178,7 @@ struct CollectionsView: View {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16)], alignment: .leading, spacing: 22) {
                     ForEach(vm.collections) { collection in
-                        NavigationLink(value: collection) {
+                        NavigationLink(value: CollectionRoute(collection)) {
                             CollectionCard(collection: collection)
                         }
                         .buttonStyle(.plain)
