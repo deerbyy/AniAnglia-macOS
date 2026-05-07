@@ -14,13 +14,23 @@ final class CollectionDetailViewModel: ObservableObject {
     private var page = 0
     private var totalPageCount: Int?
     private var reachedEnd = false
+    private var loadedCollectionId: Int64?
+    private var loadingCollectionId: Int64?
 
     var canLoadMore: Bool {
         !isLoading && !isLoadingMore && !reachedEnd
     }
 
-    func load(api: AnixartAPI, collectionId: Int64, prefetched: AnixartCollection?) async {
+    func load(api: AnixartAPI, collectionId: Int64, prefetched: AnixartCollection?, force: Bool = false) async {
+        if isLoading && loadingCollectionId == collectionId {
+            return
+        }
+        if !force, loadedCollectionId == collectionId, collection != nil {
+            return
+        }
+
         isLoading = true
+        loadingCollectionId = collectionId
         page = 0
         reachedEnd = false
         totalPageCount = nil
@@ -30,13 +40,20 @@ final class CollectionDetailViewModel: ObservableObject {
             releases = prefetched.releases
             isFavorite = prefetched.isFavorite ?? false
         }
-        defer { isLoading = false }
+        defer {
+            if loadingCollectionId == collectionId {
+                loadingCollectionId = nil
+            }
+            isLoading = false
+        }
 
         do {
             let nextInfo = try await api.collection(id: collectionId)
             info = nextInfo
             collection = nextInfo.collection
             isFavorite = nextInfo.collection.isFavorite ?? false
+        } catch is CancellationError {
+            return
         } catch {
             if collection == nil {
                 errorMessage = error.localizedDescription
@@ -54,6 +71,8 @@ final class CollectionDetailViewModel: ObservableObject {
                 reachedEnd = pageItems.isEmpty
             }
             page = 1
+        } catch is CancellationError {
+            return
         } catch {
             if collection == nil {
                 errorMessage = error.localizedDescription
@@ -62,6 +81,8 @@ final class CollectionDetailViewModel: ObservableObject {
 
         if collection == nil {
             errorMessage = "Не удалось загрузить коллекцию"
+        } else {
+            loadedCollectionId = collectionId
         }
     }
 
@@ -82,6 +103,8 @@ final class CollectionDetailViewModel: ObservableObject {
             }
             page += 1
             errorMessage = nil
+        } catch is CancellationError {
+            return
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -127,14 +150,14 @@ struct CollectionDetailView: View {
                     ProgressView().padding(40)
                 } else if let error = vm.errorMessage {
                     ErrorState(message: error) {
-                        Task { await vm.load(api: appState.api, collectionId: collectionId, prefetched: prefetched) }
+                        Task { await vm.load(api: appState.api, collectionId: collectionId, prefetched: prefetched, force: true) }
                     }
                 }
             }
             .padding(24)
         }
         .navigationTitle((vm.collection ?? prefetched)?.title ?? "Коллекция")
-        .task {
+        .task(id: collectionId) {
             await vm.load(api: appState.api, collectionId: collectionId, prefetched: prefetched)
         }
         .alert("Не удалось", isPresented: Binding(
