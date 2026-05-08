@@ -63,6 +63,7 @@ final class ProfileViewModel: ObservableObject {
 struct ProfileView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm = ProfileViewModel()
+    @State private var playingProfileVideo: Video?
 
     var body: some View {
         Group {
@@ -78,6 +79,9 @@ struct ProfileView: View {
             if appState.auth.isAuthenticated {
                 await vm.loadBookmarkPreviews(api: appState.api, syncStore: appState.bookmarkSync)
             }
+        }
+        .sheet(item: $playingProfileVideo) { video in
+            VideoPlayerSheet(video: video)
         }
     }
 
@@ -298,6 +302,8 @@ struct ProfileView: View {
             releasePreviewSection(title: "Оценки релизов", icon: "star.leadinghalf.filled", releases: profile.votes)
             releasePreviewSection(title: "Просмотрено недавно", icon: "clock.arrow.circlepath", releases: profile.history)
             collectionsPreviewSection(for: profile)
+            commentsPreviewSection(for: profile)
+            videosPreviewSection(for: profile)
         }
     }
 
@@ -368,6 +374,59 @@ struct ProfileView: View {
                                 CollectionCard(collection: collection, style: .compact)
                             }
                             .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.bottom, 4)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func commentsPreviewSection(for profile: Profile) -> some View {
+        let comments = Array((profile.releaseCommentsPreview + profile.commentsPreview).uniquedById().prefix(6))
+        if !comments.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Комментарии профиля", systemImage: "text.bubble")
+                    .font(.title3.bold())
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(comments) { comment in
+                        if let release = comment.release {
+                            NavigationLink(value: release) {
+                                ProfileCommentPreviewRow(comment: comment)
+                            }
+                            .buttonStyle(.plain)
+                        } else if let collection = comment.collection {
+                            NavigationLink(value: CollectionRoute(collection)) {
+                                ProfileCommentPreviewRow(comment: comment)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            ProfileCommentPreviewRow(comment: comment)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func videosPreviewSection(for profile: Profile) -> some View {
+        if !profile.releaseVideosPreview.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Видео профиля", systemImage: "film")
+                    .font(.title3.bold())
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 14) {
+                        ForEach(Array(profile.releaseVideosPreview.prefix(10))) { video in
+                            Button {
+                                playingProfileVideo = video
+                            } label: {
+                                ProfileVideoPreviewCard(video: video)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(video.resolvedPlayerURL == nil)
+                            .help(video.resolvedPlayerURL == nil ? "Нет ссылки на плеер" : "Открыть видео")
                         }
                     }
                     .padding(.bottom, 4)
@@ -452,6 +511,85 @@ struct ProfileView: View {
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct ProfileCommentPreviewRow: View {
+    let comment: ReleaseComment
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: comment.collection == nil ? "play.rectangle" : "rectangle.stack")
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    if let originTitle = comment.originTitle {
+                        Text(originTitle)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    if !comment.formattedDate.isEmpty {
+                        Text(comment.formattedDate)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    if let score = comment.voteCount {
+                        Label("\(score)", systemImage: "hand.thumbsup")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                Text(comment.isSpoiler == true ? "Спойлер" : comment.message)
+                    .font(.callout)
+                    .foregroundStyle(comment.isSpoiler == true ? .secondary : .primary)
+                    .lineLimit(3)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct ProfileVideoPreviewCard: View {
+    let video: Video
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack {
+                RemoteImage(url: video.thumbnailURL, contentMode: .fill) {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.1))
+                        .overlay(Image(systemName: "film").font(.title).foregroundStyle(.secondary))
+                }
+                .frame(width: 220, height: 124)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 34))
+                    .foregroundStyle(.white.opacity(video.resolvedPlayerURL == nil ? 0.35 : 0.95))
+            }
+            Text(video.title ?? "Без названия")
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(2)
+                .frame(width: 220, alignment: .leading)
+            if let host = video.hosting?.name {
+                Text(host)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(width: 220, alignment: .leading)
+    }
+}
+
+private extension Array where Element == ReleaseComment {
+    func uniquedById() -> [ReleaseComment] {
+        var seen = Set<Int64>()
+        return filter { seen.insert($0.id).inserted }
     }
 }
 

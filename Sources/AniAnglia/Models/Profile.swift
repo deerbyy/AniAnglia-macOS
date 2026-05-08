@@ -35,6 +35,9 @@ struct Profile: Codable, Identifiable, Hashable {
     let history: [Release]
     let watchDynamics: [ProfileWatchDynamic]
     let collectionsPreview: [AnixartCollection]
+    let commentsPreview: [ReleaseComment]
+    let releaseCommentsPreview: [ReleaseComment]
+    let releaseVideosPreview: [Video]
 
     var avatarURL: URL? {
         avatar.flatMap { URL(string: $0) }
@@ -101,7 +104,10 @@ struct Profile: Codable, Identifiable, Hashable {
         votes: [Release] = [],
         history: [Release] = [],
         watchDynamics: [ProfileWatchDynamic] = [],
-        collectionsPreview: [AnixartCollection] = []
+        collectionsPreview: [AnixartCollection] = [],
+        commentsPreview: [ReleaseComment] = [],
+        releaseCommentsPreview: [ReleaseComment] = [],
+        releaseVideosPreview: [Video] = []
     ) {
         self.id = id
         self.login = login
@@ -137,6 +143,9 @@ struct Profile: Codable, Identifiable, Hashable {
         self.history = history
         self.watchDynamics = watchDynamics
         self.collectionsPreview = collectionsPreview
+        self.commentsPreview = commentsPreview
+        self.releaseCommentsPreview = releaseCommentsPreview
+        self.releaseVideosPreview = releaseVideosPreview
     }
 
     init(from decoder: Decoder) throws {
@@ -179,6 +188,15 @@ struct Profile: Codable, Identifiable, Hashable {
         collectionsPreview = (try? c.decodeIfPresent([AnixartCollection].self, forKey: ProfileCodingKey("collections_preview")))
             ?? (try? c.decodeIfPresent([AnixartCollection].self, forKey: ProfileCodingKey("collectionsPreview")))
             ?? []
+        commentsPreview = (try? c.decodeIfPresent([ReleaseComment].self, forKey: ProfileCodingKey("comments_preview")))
+            ?? (try? c.decodeIfPresent([ReleaseComment].self, forKey: ProfileCodingKey("commentsPreview")))
+            ?? []
+        releaseCommentsPreview = (try? c.decodeIfPresent([ReleaseComment].self, forKey: ProfileCodingKey("release_comments_preview")))
+            ?? (try? c.decodeIfPresent([ReleaseComment].self, forKey: ProfileCodingKey("releaseCommentsPreview")))
+            ?? []
+        releaseVideosPreview = (try? c.decodeIfPresent([Video].self, forKey: ProfileCodingKey("release_videos_preview")))
+            ?? (try? c.decodeIfPresent([Video].self, forKey: ProfileCodingKey("releaseVideosPreview")))
+            ?? []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -217,6 +235,9 @@ struct Profile: Codable, Identifiable, Hashable {
         if !history.isEmpty { try c.encode(history, forKey: ProfileCodingKey("history")) }
         if !watchDynamics.isEmpty { try c.encode(watchDynamics, forKey: ProfileCodingKey("watch_dynamics")) }
         if !collectionsPreview.isEmpty { try c.encode(collectionsPreview, forKey: ProfileCodingKey("collections_preview")) }
+        if !commentsPreview.isEmpty { try c.encode(commentsPreview, forKey: ProfileCodingKey("comments_preview")) }
+        if !releaseCommentsPreview.isEmpty { try c.encode(releaseCommentsPreview, forKey: ProfileCodingKey("release_comments_preview")) }
+        if !releaseVideosPreview.isEmpty { try c.encode(releaseVideosPreview, forKey: ProfileCodingKey("release_videos_preview")) }
     }
 }
 

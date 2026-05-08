@@ -146,6 +146,14 @@ struct CollectionRoute: Hashable, Identifiable {
         isFavorite = collection.isFavorite
     }
 
+    init(_ collection: CommentCollection) {
+        id = collection.id
+        title = collection.displayTitle
+        description = nil
+        imageURLString = nil
+        isFavorite = nil
+    }
+
     var prefetchedCollection: AnixartCollection {
         AnixartCollection(
             id: id,
