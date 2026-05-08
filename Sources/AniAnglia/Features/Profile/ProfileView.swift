@@ -87,8 +87,10 @@ struct ProfileView: View {
             VStack(alignment: .leading, spacing: 20) {
                 profileHeader
                 if let profile = vm.profile {
+                    rolesSection(for: profile)
                     statsGrid(for: profile)
                     accountDetails(for: profile)
+                    profileActivitySections(for: profile)
                 }
                 Divider()
                 bookmarkSections
@@ -266,6 +268,124 @@ struct ProfileView: View {
         .padding(10)
         .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private func rolesSection(for profile: Profile) -> some View {
+        if !profile.roles.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(profile.roles) { role in
+                        Text(role.name)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(roleColor(role.color))
+                            .clipShape(Capsule())
+                    }
+                }
+                .padding(.bottom, 2)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func profileActivitySections(for profile: Profile) -> some View {
+        VStack(alignment: .leading, spacing: 18) {
+            watchDynamicsSection(for: profile)
+            releasePreviewSection(title: "Оценки релизов", icon: "star.leadinghalf.filled", releases: profile.votes)
+            releasePreviewSection(title: "Просмотрено недавно", icon: "clock.arrow.circlepath", releases: profile.history)
+            collectionsPreviewSection(for: profile)
+        }
+    }
+
+    @ViewBuilder
+    private func watchDynamicsSection(for profile: Profile) -> some View {
+        let dynamics = Array(profile.watchDynamics.suffix(14))
+        if !dynamics.isEmpty {
+            let maxCount = max(dynamics.map(\.watchedCount).max() ?? 1, 1)
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Динамика просмотра", systemImage: "chart.bar")
+                    .font(.title3.bold())
+                HStack(alignment: .bottom, spacing: 8) {
+                    ForEach(dynamics) { item in
+                        VStack(spacing: 6) {
+                            Text("\(item.watchedCount)")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.accentColor.opacity(0.82))
+                                .frame(width: 18, height: CGFloat(max(8, 74 * item.watchedCount / maxCount)))
+                            Text(item.shortDateText)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .frame(width: 34)
+                                .lineLimit(1)
+                        }
+                        .frame(width: 36)
+                    }
+                }
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func releasePreviewSection(title: String, icon: String, releases: [Release]) -> some View {
+        if !releases.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(title, systemImage: icon)
+                    .font(.title3.bold())
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 14) {
+                        ForEach(Array(releases.prefix(10))) { release in
+                            NavigationLink(value: release) {
+                                ReleaseCard(release: release)
+                                    .frame(width: 160)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.bottom, 4)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func collectionsPreviewSection(for profile: Profile) -> some View {
+        if !profile.collectionsPreview.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Коллекции профиля", systemImage: "rectangle.stack")
+                    .font(.title3.bold())
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 14) {
+                        ForEach(Array(profile.collectionsPreview.prefix(10))) { collection in
+                            NavigationLink(value: CollectionRoute(collection)) {
+                                CollectionCard(collection: collection, style: .compact)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.bottom, 4)
+                }
+            }
+        }
+    }
+
+    private func roleColor(_ hex: String?) -> Color {
+        guard let hex else { return .accentColor }
+        let cleaned = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard cleaned.count == 6, let value = Int(cleaned, radix: 16) else {
+            return .accentColor
+        }
+        let red = Double((value >> 16) & 0xFF) / 255
+        let green = Double((value >> 8) & 0xFF) / 255
+        let blue = Double(value & 0xFF) / 255
+        return Color(red: red, green: green, blue: blue)
     }
 
     @ViewBuilder

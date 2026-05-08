@@ -30,6 +30,11 @@ struct Profile: Codable, Identifiable, Hashable {
     let isSponsor: Bool?
     let isStatsHidden: Bool?
     let isCountsHidden: Bool?
+    let roles: [ProfileRole]
+    let votes: [Release]
+    let history: [Release]
+    let watchDynamics: [ProfileWatchDynamic]
+    let collectionsPreview: [AnixartCollection]
 
     var avatarURL: URL? {
         avatar.flatMap { URL(string: $0) }
@@ -91,7 +96,12 @@ struct Profile: Codable, Identifiable, Hashable {
         isVerified: Bool? = nil,
         isSponsor: Bool? = nil,
         isStatsHidden: Bool? = nil,
-        isCountsHidden: Bool? = nil
+        isCountsHidden: Bool? = nil,
+        roles: [ProfileRole] = [],
+        votes: [Release] = [],
+        history: [Release] = [],
+        watchDynamics: [ProfileWatchDynamic] = [],
+        collectionsPreview: [AnixartCollection] = []
     ) {
         self.id = id
         self.login = login
@@ -122,6 +132,11 @@ struct Profile: Codable, Identifiable, Hashable {
         self.isSponsor = isSponsor
         self.isStatsHidden = isStatsHidden
         self.isCountsHidden = isCountsHidden
+        self.roles = roles
+        self.votes = votes
+        self.history = history
+        self.watchDynamics = watchDynamics
+        self.collectionsPreview = collectionsPreview
     }
 
     init(from decoder: Decoder) throws {
@@ -155,6 +170,15 @@ struct Profile: Codable, Identifiable, Hashable {
         isSponsor = c.decodeBool("is_sponsor")
         isStatsHidden = c.decodeBool("is_stats_hidden")
         isCountsHidden = c.decodeBool("is_counts_hidden")
+        roles = (try? c.decodeIfPresent([ProfileRole].self, forKey: ProfileCodingKey("roles"))) ?? []
+        votes = (try? c.decodeIfPresent([Release].self, forKey: ProfileCodingKey("votes"))) ?? []
+        history = (try? c.decodeIfPresent([Release].self, forKey: ProfileCodingKey("history"))) ?? []
+        watchDynamics = (try? c.decodeIfPresent([ProfileWatchDynamic].self, forKey: ProfileCodingKey("watch_dynamics")))
+            ?? (try? c.decodeIfPresent([ProfileWatchDynamic].self, forKey: ProfileCodingKey("watchDynamics")))
+            ?? []
+        collectionsPreview = (try? c.decodeIfPresent([AnixartCollection].self, forKey: ProfileCodingKey("collections_preview")))
+            ?? (try? c.decodeIfPresent([AnixartCollection].self, forKey: ProfileCodingKey("collectionsPreview")))
+            ?? []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -188,6 +212,71 @@ struct Profile: Codable, Identifiable, Hashable {
         try c.encodeIfPresent(isSponsor, forKey: ProfileCodingKey("is_sponsor"))
         try c.encodeIfPresent(isStatsHidden, forKey: ProfileCodingKey("is_stats_hidden"))
         try c.encodeIfPresent(isCountsHidden, forKey: ProfileCodingKey("is_counts_hidden"))
+        if !roles.isEmpty { try c.encode(roles, forKey: ProfileCodingKey("roles")) }
+        if !votes.isEmpty { try c.encode(votes, forKey: ProfileCodingKey("votes")) }
+        if !history.isEmpty { try c.encode(history, forKey: ProfileCodingKey("history")) }
+        if !watchDynamics.isEmpty { try c.encode(watchDynamics, forKey: ProfileCodingKey("watch_dynamics")) }
+        if !collectionsPreview.isEmpty { try c.encode(collectionsPreview, forKey: ProfileCodingKey("collections_preview")) }
+    }
+}
+
+struct ProfileRole: Codable, Identifiable, Hashable {
+    let id: Int64
+    let name: String
+    let color: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: ProfileCodingKey.self)
+        id = c.decodeInt64("id") ?? c.decodeInt64("role_id") ?? 0
+        name = c.decodeString("name") ?? c.decodeString("title") ?? "Роль"
+        color = c.decodeString("color") ?? c.decodeString("hex_color")
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: ProfileCodingKey.self)
+        try c.encode(id, forKey: ProfileCodingKey("id"))
+        try c.encode(name, forKey: ProfileCodingKey("name"))
+        try c.encodeIfPresent(color, forKey: ProfileCodingKey("color"))
+    }
+}
+
+struct ProfileWatchDynamic: Codable, Identifiable, Hashable {
+    let id: Int64
+    let day: Int?
+    let watchedCount: Int
+    let date: Int64?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: ProfileCodingKey.self)
+        id = c.decodeInt64("id")
+            ?? c.decodeInt64("watch_dynamic_id")
+            ?? c.decodeInt64("date")
+            ?? c.decodeInt("day").map(Int64.init)
+            ?? 0
+        day = c.decodeInt("day")
+        watchedCount = c.decodeInt("watched_count") ?? c.decodeInt("count") ?? 0
+        date = c.decodeInt64("date") ?? c.decodeInt64("timestamp")
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: ProfileCodingKey.self)
+        try c.encode(id, forKey: ProfileCodingKey("id"))
+        try c.encodeIfPresent(day, forKey: ProfileCodingKey("day"))
+        try c.encode(watchedCount, forKey: ProfileCodingKey("watched_count"))
+        try c.encodeIfPresent(date, forKey: ProfileCodingKey("date"))
+    }
+
+    var shortDateText: String {
+        if let date, date > 0 {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "ru_RU")
+            formatter.dateFormat = "d MMM"
+            return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(date)))
+        }
+        if let day {
+            return "\(day)"
+        }
+        return ""
     }
 }
 
