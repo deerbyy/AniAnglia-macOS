@@ -24,12 +24,12 @@ struct Video: Codable, Identifiable, Hashable {
         image.flatMap { URL(string: $0) }
     }
 
-    /// Player URL with http→https conversion (avoid mixed-content / ATS).
+    /// Player URL with schemeless URLs normalized, but without changing http(s)
+    /// because some third-party players reject rewritten schemes.
     var resolvedPlayerURL: URL? {
         guard let raw = playerUrl ?? url, !raw.isEmpty else { return nil }
         var s = raw
         if s.hasPrefix("//") { s = "https:" + s }
-        if s.hasPrefix("http://") { s = "https://" + s.dropFirst("http://".count) }
         return URL(string: s)
     }
 

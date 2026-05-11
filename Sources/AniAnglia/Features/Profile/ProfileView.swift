@@ -22,13 +22,21 @@ final class ProfileViewModel: ObservableObject {
         }
     }
 
-    func loadBookmarkPreviews(api: AnixartAPI, syncStore: BookmarkSyncStore) async {
+    func loadBookmarkPreviews(api: AnixartAPI, syncStore: BookmarkSyncStore, force: Bool = false) async {
         previewsLoading = true
         defer { previewsLoading = false }
-        await syncStore.syncAll(api: api)
+        await syncStore.syncAll(api: api, force: force)
         for category in BookmarkCategory.displayOrder {
             previews[category.rawValue] = Array(syncStore.releases(for: category).prefix(8))
         }
+    }
+
+    func syncAccount(api: AnixartAPI, auth: AuthStore, syncStore: BookmarkSyncStore) async {
+        guard auth.isAuthenticated else { return }
+        isWorking = true
+        defer { isWorking = false }
+        await loadCurrentProfile(api: api, auth: auth)
+        await loadBookmarkPreviews(api: api, syncStore: syncStore, force: true)
     }
 
     func signIn(api: AnixartAPI, auth: AuthStore) async {
@@ -148,12 +156,16 @@ struct ProfileView: View {
             VStack(spacing: 8) {
                 Button {
                     Task {
-                        await vm.loadCurrentProfile(api: appState.api, auth: appState.auth)
-                        await vm.loadBookmarkPreviews(api: appState.api, syncStore: appState.bookmarkSync)
+                        await vm.syncAccount(api: appState.api, auth: appState.auth, syncStore: appState.bookmarkSync)
                     }
                 } label: {
-                    Label("Обновить", systemImage: "arrow.clockwise")
+                    if vm.isWorking || appState.bookmarkSync.isSyncing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Label("Синхронизировать", systemImage: "arrow.triangle.2.circlepath")
+                    }
                 }
+                .disabled(vm.isWorking || appState.bookmarkSync.isSyncing)
                 Button(role: .destructive) {
                     appState.auth.signOut()
                     appState.bookmarkSync.clear()
@@ -487,8 +499,7 @@ struct ProfileView: View {
                 Task {
                     await vm.signIn(api: appState.api, auth: appState.auth)
                     if appState.auth.isAuthenticated {
-                        await vm.loadCurrentProfile(api: appState.api, auth: appState.auth)
-                        await vm.loadBookmarkPreviews(api: appState.api, syncStore: appState.bookmarkSync)
+                        await vm.syncAccount(api: appState.api, auth: appState.auth, syncStore: appState.bookmarkSync)
                     }
                 }
             } label: {

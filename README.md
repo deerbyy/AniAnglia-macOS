@@ -5,7 +5,7 @@ Native macOS client for the Anixart anime catalog. The app is SwiftUI-first, tar
 ## Features
 
 - Home screen with "Рекомендации", "Обсуждают", "Сейчас смотрят", "Коллекции недели", and "Комментарии недели" sections.
-- Debounced search with pagination and genre/year/type filters.
+- Debounced search with pagination and Anixart search scopes: title, studio, director, author, and genre.
 - Release detail page with poster zoom, metadata, genres, expandable description, episodes, screenshots, related collections, video blocks, comments, and bookmark actions.
 - Public collections browser with collection detail pages, release lists, and account-synced favorite collections.
 - Episode and trailer playback through `WKWebView` embed players.
@@ -49,7 +49,9 @@ Screenshots should be captured from the first full Xcode/CI run and added here w
 - `GET /profile/list/all/{profile_id}/{list_id}/{page}`
 - `GET /profile/{profile_id}`
 
-All requests use `User-Agent: AnixartApp/9.0 beta-11-25052914 (Android 11; SDK 30; arm64-v8a)`.
+`POST /search/releases/{page}` uses a JSON body, for example `{"query":"naruto","searchBy":0}`.
+
+All requests use `User-Agent: AnixartApp/9.0 beta-11-25052914 (Android 11; SDK 30; arm64-v8a; samsung; ru_RU)`.
 
 ## Build Locally
 

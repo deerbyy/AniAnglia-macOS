@@ -45,9 +45,9 @@ extension AnixartAPI {
     // MARK: - Search
 
     func searchReleases(query: String, page: Int = 0, searchBy: Int = 0) async throws -> ReleasesResponse {
-        try await post("search/releases/\(page)", form: [
+        try await postJSON("search/releases/\(page)", body: [
             "query": query,
-            "searchBy": String(searchBy)
+            "searchBy": searchBy
         ])
     }
 

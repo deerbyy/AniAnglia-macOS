@@ -36,7 +36,7 @@
 | GET | `/release/{id}` | Один релиз |
 | GET | `/release/random` | Случайный релиз |
 | GET | `/video/release/{id}` | Видео-блоки релиза |
-| POST | `/search/releases/{page}` | Поиск (form: query, searchBy=0) |
+| POST | `/search/releases/{page}` | Поиск (JSON: query, searchBy=0..4) |
 | POST | `/filter/{page}` | Каталог с фильтрами (JSON боди) |
 | GET | `/episode/{releaseId}` | Список озвучек (`types`) |
 | GET | `/episode/{releaseId}/{typeId}` | Список плееров (`sources`) |
