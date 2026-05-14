@@ -15,7 +15,7 @@
 ## Стек, который используется
 - **Swift 5.9 + SwiftUI**, минимум **macOS 13 Ventura**.
 - **URLSession + Codable + async/await** для сети. Никаких сторонних HTTP-либ.
-- **WKWebView** для плееров Kodik/Sibnet/VK/YouTube.
+- **WKWebView** для плееров Kodik/Sibnet/Libria/VK/YouTube; iframe-плееры открываются через HTML wrapper с origin/referrer `https://anixart.tv/`.
 - **Keychain** (Security.framework) для токена.
 - **NavigationSplitView** для основной навигации.
 - Проект генерируется через **XcodeGen** (`brew install xcodegen && xcodegen generate`). `*.xcodeproj` в гите НЕ лежит — он в `.gitignore`.
@@ -96,7 +96,7 @@
 - **Каталог** (НОВОЕ): `CatalogView` с фильтрами сортировки/категории/статуса/года. Пагинация через «Показать ещё». POST `/filter/{page}`.
 - **Поиск**: debounced, фокус на TextField автоматически (`@FocusState`).
 - **Релиз**: постер + метаданные + видео-блоки + кадры. НОВОЕ: кнопки «Смотреть» и выпадающее меню закладок (5 категорий + «Убрать»).
-- **Серии** (НОВОЕ): `EpisodesView` — пикер озвучек (`types`), пикер плееров (`sources`), список серий с бейджами «просмотрено». Плеер в sheet через WKWebView, http→https rewrite, схема-лесс URL `//...` обрабатывается.
+- **Серии** (НОВОЕ): `EpisodesView` — пикер озвучек (`types`), пикер плееров (`sources`), список серий с бейджами «просмотрено». Плеер в sheet через WKWebView; YouTube/Kodik/Libria открываются iframe-wrapper’ом с Referer, схема-лесс URL `//...` обрабатывается.
 - **Скриншоты**: полноэкранный просмотрщик с навигацией ←/→.
 - **Закладки**: список по категориям (1–5), из экрана релиза добавляем/убираем.
 - **Профиль**: статистика + login form.
