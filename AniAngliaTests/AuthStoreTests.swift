@@ -4,40 +4,40 @@ import XCTest
 
 final class AuthStoreTests: XCTestCase {
     func testPersistsAndLoadsSession() throws {
-        let keychain = InMemoryKeychain()
-        let store = AuthStore(keychain: keychain)
+        let storage = InMemorySessionStorage()
+        let store = AuthStore(storage: storage)
 
         store.save(session: AuthSession(token: "saved-token", profileId: 99, profile: nil))
 
-        let reloaded = AuthStore(keychain: keychain)
+        let reloaded = AuthStore(storage: storage)
         XCTAssertEqual(reloaded.currentSession?.token, "saved-token")
         XCTAssertEqual(reloaded.currentSession?.profileId, 99)
     }
 
     func testSignOutClearsSession() {
-        let keychain = InMemoryKeychain()
-        let store = AuthStore(keychain: keychain)
+        let storage = InMemorySessionStorage()
+        let store = AuthStore(storage: storage)
         store.save(session: AuthSession(token: "token", profileId: 1, profile: nil))
 
         store.signOut()
 
         XCTAssertNil(store.currentSession)
-        XCTAssertNil(try? keychain.string(for: "profile_token"))
+        XCTAssertNil(storage.string(for: "profile_token"))
     }
 }
 
-final class InMemoryKeychain: KeychainStorage {
+final class InMemorySessionStorage: SessionStorage {
     private var values: [String: String] = [:]
 
-    func string(for account: String) throws -> String? {
-        values[account]
+    func string(for key: String) -> String? {
+        values[key]
     }
 
-    func set(_ value: String, for account: String) throws {
-        values[account] = value
+    func set(_ value: String, for key: String) {
+        values[key] = value
     }
 
-    func delete(_ account: String) throws {
-        values.removeValue(forKey: account)
+    func delete(_ key: String) {
+        values.removeValue(forKey: key)
     }
 }

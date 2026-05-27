@@ -15,11 +15,11 @@
 ## Стек, который используется
 - **Swift 5.9 + SwiftUI**, минимум **macOS 13 Ventura**.
 - **URLSession + Codable + async/await** для сети. Никаких сторонних HTTP-либ.
-- **WKWebView** для плееров Kodik/Sibnet/Libria/VK/YouTube; iframe-плееры открываются через HTML wrapper с origin/referrer `https://anixart.tv/`.
-- **Keychain** (Security.framework) для токена.
+- **WKWebView** для плееров Kodik/Sibnet/Libria/VK/YouTube; YouTube грузится прямым запросом с HTTP `Referer: https://anixart.tv/`, iframe-плееры — через HTML wrapper с origin/referrer.
+- **UserDefaults** для токена сессии: CI-сборки подписаны ad-hoc, и доступ к Keychain из каждой новой сборки вызывал диалоги пароля macOS.
 - **NavigationSplitView** для основной навигации.
 - Проект генерируется через **XcodeGen** (`brew install xcodegen && xcodegen generate`). `*.xcodeproj` в гите НЕ лежит — он в `.gitignore`.
-- CI: GitHub Actions, runner `macos-14`, билд через `xcodebuild`, упаковка `.dmg` через `hdiutil`. См. `.github/workflows/build-dmg.yml`.
+- CI: GitHub Actions, runner `macos-15`, билд через `xcodebuild`, упаковка `.dmg` через `hdiutil`. См. `.github/workflows/build-dmg.yml`.
 
 ## API Anixart
 - Базовый URL: **`https://api.anixart.tv`**
@@ -88,7 +88,7 @@
 - API-клиент `AnixartAPI` (`Sources/AniAnglia/Networking/`), публичный `auth: AuthStore`, методы `get/post/postJSON`.
 - Модели: `Release`, `Video`, `Profile`, `Episode/EpisodeType/EpisodeSource` (Codable, snake_case → camelCase via `.convertFromSnakeCase`).
 - **НЕ добавляй** явные `CodingKey` override для snake_case-полей — стратегия работает против вас (вызывает двойное переименование).
-- AuthStore с Keychain.
+- AuthStore с локальным хранилищем сессии без обращения к Keychain, чтобы ad-hoc CI-сборки не запрашивали пароль при запуске.
 - CI workflow (`.github/workflows/build-dmg.yml`): **macos-15** (Xcode 16) → xcodegen → xcodebuild Release → hdiutil → `.dmg`.
 
 **Экраны:**
@@ -96,7 +96,7 @@
 - **Каталог** (НОВОЕ): `CatalogView` с фильтрами сортировки/категории/статуса/года. Пагинация через «Показать ещё». POST `/filter/{page}`.
 - **Поиск**: debounced, фокус на TextField автоматически (`@FocusState`).
 - **Релиз**: постер + метаданные + видео-блоки + кадры. НОВОЕ: кнопки «Смотреть» и выпадающее меню закладок (5 категорий + «Убрать»).
-- **Серии** (НОВОЕ): `EpisodesView` — пикер озвучек (`types`), пикер плееров (`sources`), список серий с бейджами «просмотрено». Плеер в sheet через WKWebView; YouTube/Kodik/Libria открываются iframe-wrapper’ом с Referer, схема-лесс URL `//...` обрабатывается.
+- **Серии** (НОВОЕ): `EpisodesView` — пикер озвучек (`types`), пикер плееров (`sources`), список серий с бейджами «просмотрено». Плеер в sheet через WKWebView; YouTube открывается прямым embed-запросом с Referer, Kodik/Libria — iframe-wrapper’ом, схема-лесс URL `//...` обрабатывается.
 - **Скриншоты**: полноэкранный просмотрщик с навигацией ←/→.
 - **Закладки**: список по категориям (1–5), из экрана релиза добавляем/убираем.
 - **Профиль**: статистика + login form.

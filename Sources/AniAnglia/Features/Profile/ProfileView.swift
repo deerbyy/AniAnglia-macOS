@@ -52,6 +52,8 @@ final class ProfileViewModel: ObservableObject {
             profile = resp.profile
             errorMessage = nil
             password = ""
+        } catch let APIError.server(code, message) {
+            errorMessage = readableSignInError(code: code, fallback: message)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -59,11 +61,10 @@ final class ProfileViewModel: ObservableObject {
 
     private func readableSignInError(code: Int, fallback: String?) -> String {
         switch code {
-        case 2: return "Аккаунт не подтверждён по e-mail"
-        case 3: return "Неверный логин или пароль"
+        case 2: return "Неверный логин или пароль"
         case 4: return "Аккаунт заблокирован"
         case 5: return "Включена двухфакторная авторизация — войди через сайт"
-        default: return fallback ?? "Не удалось войти (code=\(code))"
+        default: return fallback ?? "Anixart отклонил вход (code=\(code))"
         }
     }
 }

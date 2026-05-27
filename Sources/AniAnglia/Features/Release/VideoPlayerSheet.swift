@@ -137,12 +137,16 @@ private struct PlayerWebPage {
 
     init(url: URL, baseURL: URL) {
         let normalizedURL = url.normalizedPlayerURL
-        let frameURL = normalizedURL.youtubeEmbedURL ?? normalizedURL
-        let host = frameURL.host?.lowercased() ?? ""
+        let host = normalizedURL.host?.lowercased() ?? ""
 
-        if frameURL.youtubeEmbedURL != nil || host.isKnownIframePlayerHost {
-            self.key = "iframe:\(frameURL.absoluteString)"
-            self.load = .iframeHTML(Self.iframeHTML(for: frameURL), baseURL: baseURL)
+        if let youtubeURL = normalizedURL.youtubeEmbedURL {
+            // YouTube error 153 is produced when its embed navigation has no
+            // HTTP Referer. Load the player request itself with that header.
+            self.key = "youtube:\(youtubeURL.absoluteString)"
+            self.load = .request(Self.request(for: youtubeURL, referer: baseURL))
+        } else if host.isKnownIframePlayerHost {
+            self.key = "iframe:\(normalizedURL.absoluteString)"
+            self.load = .iframeHTML(Self.iframeHTML(for: normalizedURL), baseURL: baseURL)
         } else {
             self.key = "request:\(normalizedURL.absoluteString)"
             self.load = .request(Self.request(for: normalizedURL, referer: baseURL))
