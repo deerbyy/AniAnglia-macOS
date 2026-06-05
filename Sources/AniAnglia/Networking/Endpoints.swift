@@ -230,6 +230,11 @@ extension AnixartAPI {
         try await get("release/comment/all/\(releaseId)/\(page)", query: [URLQueryItem(name: "sort", value: String(sort))])
     }
 
+    /// Replies for a release comment.
+    func commentReplies(commentId: Int64, page: Int) async throws -> CommentsResponse {
+        try await get("release/comment/replies/\(commentId)/\(page)")
+    }
+
     /// Post a new comment to a release. `parentCommentId` is for replies.
     /// Spoiler flag marks the message as a hidden spoiler.
     func addComment(releaseId: Int64, message: String, parentCommentId: Int64? = nil, isSpoiler: Bool = false) async throws -> SimpleResponse {

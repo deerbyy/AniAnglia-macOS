@@ -6,7 +6,7 @@ Native macOS client for the Anixart anime catalog. The app is SwiftUI-first, tar
 
 - Home screen with "Рекомендации", "Обсуждают", "Сейчас смотрят", "Коллекции недели", and "Комментарии недели" sections.
 - Debounced search with pagination and Anixart search scopes: title, studio, director, author, and genre.
-- Release detail page with poster zoom, metadata, genres, expandable description, episodes, screenshots, related collections, video blocks, comments, and bookmark actions.
+- Release detail page with poster zoom, metadata, genres, expandable description, episodes, screenshots, related collections, video blocks, comments with expandable replies, and bookmark actions.
 - Public collections browser with collection detail pages, release lists, and account-synced favorite collections.
 - Episode and trailer playback through `WKWebView` embed players: YouTube is loaded with an explicit Anixart HTTP referrer, while Kodik/Libria iframe pages receive an Anixart origin.
 - Login/password auth with token/profile id stored in local app preferences. CI artifacts are ad-hoc signed, so avoiding Keychain access prevents password dialogs after each newly installed build.
@@ -41,6 +41,7 @@ Screenshots should be captured from the first full Xcode/CI run and added here w
 - `GET /episode/{release_id}/{source_id}/{episode_id}`
 - `GET /video/release/{release_id}`
 - `GET /release/comment/all/{release_id}/{page}`
+- `GET /release/comment/replies/{comment_id}/{page}`
 - `GET /favorite/all/{page}`
 - `GET /favorite/add/{release_id}`
 - `GET /favorite/delete/{release_id}`

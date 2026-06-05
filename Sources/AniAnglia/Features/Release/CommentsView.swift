@@ -19,6 +19,17 @@ final class CommentsViewModel: ObservableObject {
     /// Local override of vote state for snappy UI (commentId -> +1/-1).
     @Published var voteOverrides: [Int64: Int] = [:]
 
+    @Published var replies: [Int64: [ReleaseComment]] = [:]
+    @Published var replyPages: [Int64: Int] = [:]
+    @Published var replyTotalPages: [Int64: Int] = [:]
+    @Published var expandedReplyIds: Set<Int64> = []
+    @Published var loadingReplyIds: Set<Int64> = []
+    @Published var replyDrafts: [Int64: String] = [:]
+    @Published var replySpoilers: Set<Int64> = []
+    @Published var postingReplyIds: Set<Int64> = []
+    @Published var replyErrors: [Int64: String] = [:]
+    @Published var activeReplyComposerId: Int64?
+
     init(releaseId: Int64) {
         self.releaseId = releaseId
     }
@@ -63,6 +74,101 @@ final class CommentsViewModel: ObservableObject {
         }
     }
 
+    func toggleReplies(for comment: ReleaseComment, api: AnixartAPI) async {
+        if expandedReplyIds.contains(comment.id) {
+            expandedReplyIds.remove(comment.id)
+            return
+        }
+        expandedReplyIds.insert(comment.id)
+        if replies[comment.id] == nil {
+            await loadReplies(for: comment, page: 0, replace: true, api: api)
+        }
+    }
+
+    func loadMoreReplies(for comment: ReleaseComment, api: AnixartAPI) async {
+        guard !loadingReplyIds.contains(comment.id), canLoadMoreReplies(for: comment) else { return }
+        await loadReplies(for: comment, page: (replyPages[comment.id] ?? 0) + 1, replace: false, api: api)
+    }
+
+    func toggleReplyComposer(for comment: ReleaseComment) {
+        activeReplyComposerId = activeReplyComposerId == comment.id ? nil : comment.id
+        replyErrors[comment.id] = nil
+    }
+
+    func submitReply(to comment: ReleaseComment, api: AnixartAPI) async -> Bool {
+        let trimmed = (replyDrafts[comment.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        postingReplyIds.insert(comment.id)
+        replyErrors[comment.id] = nil
+        defer { postingReplyIds.remove(comment.id) }
+
+        do {
+            let resp = try await api.addComment(
+                releaseId: releaseId,
+                message: trimmed,
+                parentCommentId: comment.id,
+                isSpoiler: replySpoilers.contains(comment.id)
+            )
+            if resp.code == 0 {
+                replyDrafts[comment.id] = ""
+                replySpoilers.remove(comment.id)
+                activeReplyComposerId = nil
+                expandedReplyIds.insert(comment.id)
+                await loadReplies(for: comment, page: 0, replace: true, api: api)
+                return true
+            }
+            replyErrors[comment.id] = resp.message ?? "Не удалось отправить ответ (code=\(resp.code))"
+            return false
+        } catch {
+            replyErrors[comment.id] = error.localizedDescription
+            return false
+        }
+    }
+
+    func isRepliesExpanded(for comment: ReleaseComment) -> Bool {
+        expandedReplyIds.contains(comment.id)
+    }
+
+    func isLoadingReplies(for comment: ReleaseComment) -> Bool {
+        loadingReplyIds.contains(comment.id)
+    }
+
+    func isPostingReply(to comment: ReleaseComment) -> Bool {
+        postingReplyIds.contains(comment.id)
+    }
+
+    func canLoadMoreReplies(for comment: ReleaseComment) -> Bool {
+        guard expandedReplyIds.contains(comment.id) else { return false }
+        if let total = replyTotalPages[comment.id] {
+            return (replyPages[comment.id] ?? 0) + 1 < total
+        }
+        if let expected = comment.replyCount {
+            return (replies[comment.id]?.count ?? 0) < expected
+        }
+        return false
+    }
+
+    private func loadReplies(for comment: ReleaseComment, page: Int, replace: Bool, api: AnixartAPI) async {
+        loadingReplyIds.insert(comment.id)
+        defer { loadingReplyIds.remove(comment.id) }
+
+        do {
+            let resp = try await api.commentReplies(commentId: comment.id, page: page)
+            if replace {
+                replies[comment.id] = resp.content
+            } else {
+                replies[comment.id, default: []].append(contentsOf: resp.content)
+            }
+            replyPages[comment.id] = page
+            if let total = resp.totalPageCount {
+                replyTotalPages[comment.id] = total
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func reload(api: AnixartAPI) async {
         isLoading = true
         page = 0
@@ -71,6 +177,7 @@ final class CommentsViewModel: ObservableObject {
             let resp = try await api.releaseComments(releaseId: releaseId, page: 0, sort: sort)
             comments = resp.content
             totalPages = resp.totalPageCount
+            resetReplyState()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -95,6 +202,19 @@ final class CommentsViewModel: ObservableObject {
     var canLoadMore: Bool {
         guard let total = totalPages else { return true }
         return page + 1 < total
+    }
+
+    private func resetReplyState() {
+        replies = [:]
+        replyPages = [:]
+        replyTotalPages = [:]
+        expandedReplyIds = []
+        loadingReplyIds = []
+        replyDrafts = [:]
+        replySpoilers = []
+        postingReplyIds = []
+        replyErrors = [:]
+        activeReplyComposerId = nil
     }
 }
 
@@ -151,14 +271,7 @@ struct CommentsView: View {
             } else {
                 LazyVStack(alignment: .leading, spacing: 14) {
                     ForEach(vm.comments) { comment in
-                        CommentRow(
-                            comment: comment,
-                            currentVote: vm.currentVote(for: comment),
-                            canVote: appState.auth.isAuthenticated,
-                            onVote: { value in
-                                Task { await vm.vote(comment, value: value, api: appState.api) }
-                            }
-                        )
+                        commentThread(for: comment)
                     }
                     if vm.canLoadMore {
                         Button {
@@ -177,6 +290,102 @@ struct CommentsView: View {
             }
         }
         .task { await vm.reload(api: appState.api) }
+    }
+
+    @ViewBuilder
+    private func commentThread(for comment: ReleaseComment) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            CommentRow(
+                comment: comment,
+                currentVote: vm.currentVote(for: comment),
+                canVote: appState.auth.isAuthenticated,
+                onVote: { value in
+                    Task { await vm.vote(comment, value: value, api: appState.api) }
+                }
+            )
+
+            HStack(spacing: 12) {
+                if appState.auth.isAuthenticated {
+                    Button {
+                        vm.toggleReplyComposer(for: comment)
+                    } label: {
+                        Label("Ответить", systemImage: "arrowshape.turn.up.left")
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if (comment.replyCount ?? 0) > 0 || !(vm.replies[comment.id] ?? []).isEmpty {
+                    Button {
+                        Task { await vm.toggleReplies(for: comment, api: appState.api) }
+                    } label: {
+                        HStack(spacing: 5) {
+                            if vm.isLoadingReplies(for: comment) {
+                                ProgressView().controlSize(.small)
+                            }
+                            Image(systemName: vm.isRepliesExpanded(for: comment) ? "chevron.down" : "chevron.right")
+                            Text(vm.isRepliesExpanded(for: comment) ? "Скрыть ответы" : "Ответы: \(comment.replyCount ?? 0)")
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.tint)
+            .padding(.leading, 46)
+
+            if vm.activeReplyComposerId == comment.id {
+                replyComposer(for: comment)
+                    .padding(.leading, 46)
+            }
+
+            if vm.isRepliesExpanded(for: comment) {
+                repliesList(for: comment)
+                    .padding(.leading, 46)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func repliesList(for comment: ReleaseComment) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(vm.replies[comment.id] ?? []) { reply in
+                CommentRow(
+                    comment: reply,
+                    currentVote: vm.currentVote(for: reply),
+                    canVote: appState.auth.isAuthenticated,
+                    onVote: { value in
+                        Task { await vm.vote(reply, value: value, api: appState.api) }
+                    }
+                )
+            }
+
+            if vm.isLoadingReplies(for: comment) && (vm.replies[comment.id] ?? []).isEmpty {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.vertical, 6)
+            }
+
+            if vm.canLoadMoreReplies(for: comment) {
+                Button {
+                    Task { await vm.loadMoreReplies(for: comment, api: appState.api) }
+                } label: {
+                    HStack(spacing: 6) {
+                        if vm.isLoadingReplies(for: comment) {
+                            ProgressView().controlSize(.small)
+                        }
+                        Text("Показать ещё ответы")
+                    }
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+            }
+        }
+        .padding(.leading, 14)
+        .overlay(alignment: .leading) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.22))
+                .frame(width: 2)
+        }
     }
 
     @ViewBuilder
@@ -216,6 +425,73 @@ struct CommentsView: View {
                 .disabled(vm.isPosting || vm.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
+    }
+
+    @ViewBuilder
+    private func replyComposer(for comment: ReleaseComment) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .topLeading) {
+                if (vm.replyDrafts[comment.id] ?? "").isEmpty {
+                    Text("Ответить \(comment.profile?.displayName ?? "пользователю")…")
+                        .foregroundStyle(.tertiary)
+                        .padding(8)
+                        .allowsHitTesting(false)
+                }
+                TextEditor(text: replyDraftBinding(for: comment.id))
+                    .frame(minHeight: 54, maxHeight: 100)
+                    .padding(4)
+                    .scrollContentBackground(.hidden)
+            }
+            .background(Color.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            HStack {
+                Toggle("Спойлер", isOn: replySpoilerBinding(for: comment.id))
+                    .toggleStyle(.checkbox)
+                if let err = vm.replyErrors[comment.id] {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
+                Spacer()
+                Button("Отмена") {
+                    vm.toggleReplyComposer(for: comment)
+                }
+                .buttonStyle(.borderless)
+                Button {
+                    Task { _ = await vm.submitReply(to: comment, api: appState.api) }
+                } label: {
+                    if vm.isPostingReply(to: comment) {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Ответить")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    vm.isPostingReply(to: comment)
+                    || (vm.replyDrafts[comment.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+            }
+        }
+    }
+
+    private func replyDraftBinding(for commentId: Int64) -> Binding<String> {
+        Binding(
+            get: { vm.replyDrafts[commentId] ?? "" },
+            set: { vm.replyDrafts[commentId] = $0 }
+        )
+    }
+
+    private func replySpoilerBinding(for commentId: Int64) -> Binding<Bool> {
+        Binding(
+            get: { vm.replySpoilers.contains(commentId) },
+            set: { isOn in
+                if isOn {
+                    vm.replySpoilers.insert(commentId)
+                } else {
+                    vm.replySpoilers.remove(commentId)
+                }
+            }
+        )
     }
 }
 
@@ -290,11 +566,6 @@ private struct CommentRow: View {
                     .buttonStyle(.plain)
                     .disabled(!canVote)
 
-                    if let replies = comment.replyCount, replies > 0 {
-                        Text("Ответов: \(replies)")
-                            .font(.caption)
-                            .foregroundStyle(.tint)
-                    }
                 }
                 .font(.callout)
             }

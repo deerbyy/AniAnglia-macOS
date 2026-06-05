@@ -70,7 +70,6 @@
 ```
 
 ### Эндпоинты, которые ещё не подключены, но точно есть
-- `/release/comment/replies/{parentId}/{page}` — ответы на комментарий
 - `/release/comment/edit/{commentId}` (POST) — редактирование своего комментария
 - `/release/comment/delete/{commentId}` — удаление своего
 - `/profile/friend/all/{profileId}/{page}`, `/profile/friend/request/...` — друзья
@@ -106,6 +105,7 @@
 - **Исправление краша Swift Concurrency (v0.3)**: `async let` + `defer` вызывал фатальный `swift_task_dealloc → asyncLet_finish_after_task_completion`. Рефактор на простой последовательный `try await` в `HomeView.load()` и `ReleaseDetailView.load()`. **НИКОГДА** не используй `async let` вместе с `defer` в @MainActor контексте.
 - **Глобальный вход (v0.3)**: `Features/Account/AccountToolbar.swift` — кнопка в тулбаре справа. Когда не вошёл — «Войти» вызывает sheet `LoginSheet`. Когда вошёл — показывает аватар + логин с меню «Открыть профиль / Выйти». Читаемые ошибки логина (code 2/3/4/5).
 - **Комментарии (v0.4)**: `Features/Release/CommentsView.swift` встроен в `ReleaseDetailView`. Сортировка топ/новые/старые, ленивая пагинация, раскрытие спойлеров.
+- **Ответы на комментарии (v0.7)**: у комментариев есть раскрываемая ветка ответов через `/release/comment/replies/{id}/{page}`, догрузка следующих страниц, reply composer с `parent_comment_id` и спойлер-флагом, голосование работает и для ответов.
 - **История просмотров (v0.4)**: новый таб в сайдбаре (`SidebarItem.history`), `Features/History/HistoryView.swift`. Требует авторизацию (`/history/{page}`).
 - **Отметка серии просмотренной (v0.4)**: кнопка-галочка в `EpisodeRow`. Оптимистичный апдейт с откатом при ошибке. Авто-пометка при закрытии плеера.
 - **Мультиселект жанров (v0.5)**: `Features/Catalog/GenresPickerButton.swift` — popover с чекбоксами на 45 жанров из `Models/AnixartGenres.swift` (извлечены из iOS-источника `LibanixartApi.mm`). Переключатель «Исключить выбранные» (`is_genres_exclude_mode`).
@@ -117,7 +117,7 @@
 - **AppState.selectSidebar / openRelease (v0.6)**: новые helpers для навигации между вкладками с опциями (например «открыть Закладки с категорией 'Brosheno'»).
 
 ## Что НЕ сделано (TODO)
-- [ ] Ответы на комментарии (`/release/comment/replies/{id}/{page}`) + редактирование/удаление своих.
+- [ ] Редактирование/удаление своих комментариев (`/release/comment/edit/{commentId}`, `/release/comment/delete/{commentId}`).
 - [ ] Друзья и заявки (`/profile/friend/all/...`).
 - [ ] Настройки профиля (изменение логина/пароля, аватара).
 - [ ] Авто-пагинация в закладках/поиске (сейчас всегда page=0).
