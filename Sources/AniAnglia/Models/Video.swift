@@ -24,11 +24,18 @@ struct Video: Codable, Identifiable, Hashable {
         image.flatMap { URL(string: $0) }
     }
 
+    var externalBrowserURL: URL? {
+        normalizedURL(from: url) ?? resolvedPlayerURL
+    }
+
     /// Player URL with schemeless URLs normalized, but without changing http(s)
     /// because some third-party players reject rewritten schemes.
     var resolvedPlayerURL: URL? {
-        guard let raw = playerUrl ?? url, !raw.isEmpty else { return nil }
-        var s = raw
+        normalizedURL(from: playerUrl ?? url)
+    }
+
+    private func normalizedURL(from raw: String?) -> URL? {
+        guard var s = raw, !s.isEmpty else { return nil }
         if s.hasPrefix("//") { s = "https:" + s }
         return URL(string: s)
     }

@@ -19,7 +19,7 @@ struct VideoPlayerSheet: View {
                     }
                 }
                 Spacer()
-                if let url = video.resolvedPlayerURL {
+                if let url = video.externalBrowserURL {
                     Link(destination: url) {
                         Label("Открыть в браузере", systemImage: "safari")
                     }
