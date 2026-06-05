@@ -29,6 +29,12 @@ final class CommentsViewModel: ObservableObject {
     @Published var postingReplyIds: Set<Int64> = []
     @Published var replyErrors: [Int64: String] = [:]
     @Published var activeReplyComposerId: Int64?
+    @Published var activeEditCommentId: Int64?
+    @Published var editDrafts: [Int64: String] = [:]
+    @Published var editSpoilers: Set<Int64> = []
+    @Published var editErrors: [Int64: String] = [:]
+    @Published var updatingCommentIds: Set<Int64> = []
+    @Published var deletingCommentIds: Set<Int64> = []
 
     init(releaseId: Int64) {
         self.releaseId = releaseId
@@ -125,6 +131,74 @@ final class CommentsViewModel: ObservableObject {
         }
     }
 
+    func beginEditing(_ comment: ReleaseComment) {
+        if activeEditCommentId == comment.id {
+            activeEditCommentId = nil
+            return
+        }
+        activeEditCommentId = comment.id
+        editDrafts[comment.id] = comment.message
+        if comment.isSpoiler == true {
+            editSpoilers.insert(comment.id)
+        } else {
+            editSpoilers.remove(comment.id)
+        }
+        editErrors[comment.id] = nil
+    }
+
+    func cancelEditing(_ comment: ReleaseComment) {
+        if activeEditCommentId == comment.id {
+            activeEditCommentId = nil
+        }
+        editErrors[comment.id] = nil
+    }
+
+    func submitEdit(_ comment: ReleaseComment, parent: ReleaseComment?, api: AnixartAPI) async -> Bool {
+        let trimmed = (editDrafts[comment.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        updatingCommentIds.insert(comment.id)
+        editErrors[comment.id] = nil
+        defer { updatingCommentIds.remove(comment.id) }
+
+        do {
+            let resp = try await api.editComment(
+                commentId: comment.id,
+                message: trimmed,
+                isSpoiler: editSpoilers.contains(comment.id)
+            )
+            if resp.code == 0 {
+                replaceComment(comment.edited(message: trimmed, isSpoiler: editSpoilers.contains(comment.id)), parent: parent)
+                activeEditCommentId = nil
+                return true
+            }
+            editErrors[comment.id] = resp.message ?? "Не удалось сохранить (code=\(resp.code))"
+            return false
+        } catch {
+            editErrors[comment.id] = error.localizedDescription
+            return false
+        }
+    }
+
+    func delete(_ comment: ReleaseComment, parent: ReleaseComment?, api: AnixartAPI) async {
+        deletingCommentIds.insert(comment.id)
+        defer { deletingCommentIds.remove(comment.id) }
+
+        do {
+            _ = try await api.deleteComment(commentId: comment.id)
+            removeComment(comment, parent: parent)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func isUpdating(_ comment: ReleaseComment) -> Bool {
+        updatingCommentIds.contains(comment.id)
+    }
+
+    func isDeleting(_ comment: ReleaseComment) -> Bool {
+        deletingCommentIds.contains(comment.id)
+    }
+
     func isRepliesExpanded(for comment: ReleaseComment) -> Bool {
         expandedReplyIds.contains(comment.id)
     }
@@ -167,6 +241,37 @@ final class CommentsViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func replaceComment(_ edited: ReleaseComment, parent: ReleaseComment?) {
+        if let parent {
+            guard var items = replies[parent.id],
+                  let index = items.firstIndex(where: { $0.id == edited.id }) else { return }
+            items[index] = edited
+            replies[parent.id] = items
+        } else if let index = comments.firstIndex(where: { $0.id == edited.id }) {
+            comments[index] = edited
+        }
+    }
+
+    private func removeComment(_ comment: ReleaseComment, parent: ReleaseComment?) {
+        if let parent {
+            replies[parent.id]?.removeAll { $0.id == comment.id }
+        } else {
+            comments.removeAll { $0.id == comment.id }
+            replies[comment.id] = nil
+            expandedReplyIds.remove(comment.id)
+        }
+
+        voteOverrides[comment.id] = nil
+        replyDrafts[comment.id] = nil
+        replyErrors[comment.id] = nil
+        editDrafts[comment.id] = nil
+        editErrors[comment.id] = nil
+        editSpoilers.remove(comment.id)
+        replySpoilers.remove(comment.id)
+        if activeEditCommentId == comment.id { activeEditCommentId = nil }
+        if activeReplyComposerId == comment.id { activeReplyComposerId = nil }
     }
 
     func reload(api: AnixartAPI) async {
@@ -215,6 +320,12 @@ final class CommentsViewModel: ObservableObject {
         postingReplyIds = []
         replyErrors = [:]
         activeReplyComposerId = nil
+        activeEditCommentId = nil
+        editDrafts = [:]
+        editSpoilers = []
+        editErrors = [:]
+        updatingCommentIds = []
+        deletingCommentIds = []
     }
 }
 
@@ -299,10 +410,23 @@ struct CommentsView: View {
                 comment: comment,
                 currentVote: vm.currentVote(for: comment),
                 canVote: appState.auth.isAuthenticated,
+                canManage: isOwn(comment),
+                isDeleting: vm.isDeleting(comment),
                 onVote: { value in
                     Task { await vm.vote(comment, value: value, api: appState.api) }
+                },
+                onEdit: {
+                    vm.beginEditing(comment)
+                },
+                onDelete: {
+                    Task { await vm.delete(comment, parent: nil, api: appState.api) }
                 }
             )
+
+            if vm.activeEditCommentId == comment.id {
+                editComposer(for: comment, parent: nil)
+                    .padding(.leading, 46)
+            }
 
             HStack(spacing: 12) {
                 if appState.auth.isAuthenticated {
@@ -349,14 +473,7 @@ struct CommentsView: View {
     private func repliesList(for comment: ReleaseComment) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             ForEach(vm.replies[comment.id] ?? []) { reply in
-                CommentRow(
-                    comment: reply,
-                    currentVote: vm.currentVote(for: reply),
-                    canVote: appState.auth.isAuthenticated,
-                    onVote: { value in
-                        Task { await vm.vote(reply, value: value, api: appState.api) }
-                    }
-                )
+                replyRow(reply, parent: comment)
             }
 
             if vm.isLoadingReplies(for: comment) && (vm.replies[comment.id] ?? []).isEmpty {
@@ -385,6 +502,32 @@ struct CommentsView: View {
             Rectangle()
                 .fill(Color.secondary.opacity(0.22))
                 .frame(width: 2)
+        }
+    }
+
+    @ViewBuilder
+    private func replyRow(_ reply: ReleaseComment, parent: ReleaseComment) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            CommentRow(
+                comment: reply,
+                currentVote: vm.currentVote(for: reply),
+                canVote: appState.auth.isAuthenticated,
+                canManage: isOwn(reply),
+                isDeleting: vm.isDeleting(reply),
+                onVote: { value in
+                    Task { await vm.vote(reply, value: value, api: appState.api) }
+                },
+                onEdit: {
+                    vm.beginEditing(reply)
+                },
+                onDelete: {
+                    Task { await vm.delete(reply, parent: parent, api: appState.api) }
+                }
+            )
+
+            if vm.activeEditCommentId == reply.id {
+                editComposer(for: reply, parent: parent)
+            }
         }
     }
 
@@ -493,13 +636,81 @@ struct CommentsView: View {
             }
         )
     }
+
+    @ViewBuilder
+    private func editComposer(for comment: ReleaseComment, parent: ReleaseComment?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextEditor(text: editDraftBinding(for: comment.id))
+                .frame(minHeight: 54, maxHeight: 120)
+                .padding(4)
+                .scrollContentBackground(.hidden)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            HStack {
+                Toggle("Спойлер", isOn: editSpoilerBinding(for: comment.id))
+                    .toggleStyle(.checkbox)
+                if let err = vm.editErrors[comment.id] {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
+                Spacer()
+                Button("Отмена") {
+                    vm.cancelEditing(comment)
+                }
+                .buttonStyle(.borderless)
+                Button {
+                    Task { _ = await vm.submitEdit(comment, parent: parent, api: appState.api) }
+                } label: {
+                    if vm.isUpdating(comment) {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Сохранить")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    vm.isUpdating(comment)
+                    || (vm.editDrafts[comment.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+            }
+        }
+    }
+
+    private func editDraftBinding(for commentId: Int64) -> Binding<String> {
+        Binding(
+            get: { vm.editDrafts[commentId] ?? "" },
+            set: { vm.editDrafts[commentId] = $0 }
+        )
+    }
+
+    private func editSpoilerBinding(for commentId: Int64) -> Binding<Bool> {
+        Binding(
+            get: { vm.editSpoilers.contains(commentId) },
+            set: { isOn in
+                if isOn {
+                    vm.editSpoilers.insert(commentId)
+                } else {
+                    vm.editSpoilers.remove(commentId)
+                }
+            }
+        )
+    }
+
+    private func isOwn(_ comment: ReleaseComment) -> Bool {
+        guard let profileId = appState.auth.profileId else { return false }
+        return comment.profile?.id == profileId
+    }
 }
 
 private struct CommentRow: View {
     let comment: ReleaseComment
     let currentVote: Int
     let canVote: Bool
+    let canManage: Bool
+    let isDeleting: Bool
     let onVote: (Int) -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
 
     private var displayedScore: Int {
         let base = (comment.voteCount ?? 0)
@@ -533,6 +744,31 @@ private struct CommentRow: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    if canManage {
+                        Menu {
+                            Button {
+                                onEdit()
+                            } label: {
+                                Label("Редактировать", systemImage: "pencil")
+                            }
+                            Button(role: .destructive) {
+                                onDelete()
+                            } label: {
+                                Label("Удалить", systemImage: "trash")
+                            }
+                        } label: {
+                            if isDeleting {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "ellipsis.circle")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .disabled(isDeleting)
+                    }
                 }
                 if comment.isSpoiler == true {
                     SpoilerText(text: comment.message)

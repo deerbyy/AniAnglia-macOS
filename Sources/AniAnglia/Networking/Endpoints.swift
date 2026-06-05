@@ -246,6 +246,19 @@ extension AnixartAPI {
         return try await postJSON("release/comment/add/\(releaseId)", body: body)
     }
 
+    /// Edit one of the current user's comments.
+    func editComment(commentId: Int64, message: String, isSpoiler: Bool = false) async throws -> SimpleResponse {
+        try await postJSON("release/comment/edit/\(commentId)", body: [
+            "message": message,
+            "is_spoiler": isSpoiler
+        ])
+    }
+
+    /// Delete one of the current user's comments.
+    func deleteComment(commentId: Int64) async throws -> SimpleResponse {
+        try await get("release/comment/delete/\(commentId)")
+    }
+
     /// Vote on a comment. value: 1 = like, -1 = dislike, 0 = remove vote.
     func voteComment(commentId: Int64, value: Int) async throws -> SimpleResponse {
         try await get("release/comment/vote/\(commentId)/\(value)")

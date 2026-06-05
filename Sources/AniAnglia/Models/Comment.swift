@@ -76,6 +76,63 @@ struct ReleaseComment: Codable, Identifiable, Hashable {
         return nil
     }
 
+    init(
+        id: Int64,
+        message: String,
+        timestamp: Int64?,
+        likesCount: Int?,
+        voteCount: Int?,
+        vote: Int?,
+        isEdited: Bool?,
+        isDeleted: Bool?,
+        isReply: Bool?,
+        isSpoiler: Bool?,
+        replyCount: Int?,
+        parentCommentId: Int64?,
+        postedAtEpisode: Int?,
+        profile: CommentProfile?,
+        release: Release?,
+        collection: CommentCollection?
+    ) {
+        self.id = id
+        self.message = message
+        self.timestamp = timestamp
+        self.likesCount = likesCount
+        self.voteCount = voteCount
+        self.vote = vote
+        self.isEdited = isEdited
+        self.isDeleted = isDeleted
+        self.isReply = isReply
+        self.isSpoiler = isSpoiler
+        self.replyCount = replyCount
+        self.parentCommentId = parentCommentId
+        self.postedAtEpisode = postedAtEpisode
+        self.profile = profile
+        self.release = release
+        self.collection = collection
+    }
+
+    func edited(message: String, isSpoiler: Bool) -> ReleaseComment {
+        ReleaseComment(
+            id: id,
+            message: message,
+            timestamp: timestamp,
+            likesCount: likesCount,
+            voteCount: voteCount,
+            vote: vote,
+            isEdited: true,
+            isDeleted: isDeleted,
+            isReply: isReply,
+            isSpoiler: isSpoiler,
+            replyCount: replyCount,
+            parentCommentId: parentCommentId,
+            postedAtEpisode: postedAtEpisode,
+            profile: profile,
+            release: release,
+            collection: collection
+        )
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CommentCodingKey.self)
         id = c.decodeInt64("id") ?? 0
