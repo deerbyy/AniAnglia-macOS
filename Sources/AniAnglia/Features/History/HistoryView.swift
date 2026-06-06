@@ -8,6 +8,15 @@ final class HistoryViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var isLoadingMore = false
     @Published var errorMessage: String?
+    @Published var searchQuery = ""
+
+    var filteredReleases: [Release] {
+        releases.filter { $0.matchesLibraryQuery(searchQuery) }
+    }
+
+    var isSearching: Bool {
+        !searchQuery.normalizedLibrarySearchQuery.isEmpty
+    }
 
     func reload(api: AnixartAPI) async {
         isLoading = true
@@ -45,8 +54,8 @@ final class HistoryViewModel: ObservableObject {
         return page + 1 < total
     }
 
-    func loadMoreIfNeeded(current release: Release, api: AnixartAPI) async {
-        guard release.id == releases.last?.id else { return }
+    func loadMoreIfNeeded(current release: Release, visibleReleases: [Release], api: AnixartAPI) async {
+        guard release.id == visibleReleases.last?.id else { return }
         await loadMore(api: api)
     }
 
@@ -75,39 +84,39 @@ struct HistoryView: View {
                     ErrorState(message: error) {
                         Task { await vm.reload(api: appState.api) }
                     }
+                } else if vm.releases.isEmpty && vm.isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, minHeight: 240)
                 } else if vm.releases.isEmpty && !vm.isLoading {
                     ContentUnavailable(systemImage: "clock",
                                        title: "История пуста",
                                        message: "Когда отметишь хотя бы одну серию просмотренной, релиз появится здесь.")
+                } else if vm.filteredReleases.isEmpty {
+                    searchField
+                    ContentUnavailable(systemImage: "magnifyingglass",
+                                       title: "Ничего не найдено",
+                                       message: "Попробуй изменить запрос или догрузить историю ниже.")
+                    paginationFooter
                 } else {
+                    searchField
                     LazyVGrid(columns: columns, spacing: 18) {
-                        ForEach(vm.releases) { release in
+                        ForEach(vm.filteredReleases) { release in
                             NavigationLink(value: release) {
                                 ReleaseCard(release: release)
                             }
                             .buttonStyle(.plain)
                             .onAppear {
-                                Task { await vm.loadMoreIfNeeded(current: release, api: appState.api) }
+                                Task {
+                                    await vm.loadMoreIfNeeded(
+                                        current: release,
+                                        visibleReleases: vm.filteredReleases,
+                                        api: appState.api
+                                    )
+                                }
                             }
                         }
                     }
-                    if vm.isLoadingMore {
-                        ProgressView()
-                            .controlSize(.small)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 8)
-                    } else if vm.canLoadMore {
-                        Button {
-                            Task { await vm.loadMore(api: appState.api) }
-                        } label: {
-                            HStack {
-                                Text("Показать ещё")
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .padding(.top, 8)
-                    }
+                    paginationFooter
                 }
             }
             .padding(20)
@@ -127,6 +136,47 @@ struct HistoryView: View {
             if appState.auth.isAuthenticated && vm.releases.isEmpty {
                 await vm.reload(api: appState.api)
             }
+        }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Поиск в истории", text: $vm.searchQuery)
+                .textFieldStyle(.plain)
+            if !vm.searchQuery.isEmpty {
+                Button {
+                    vm.searchQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color.secondary.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private var paginationFooter: some View {
+        if vm.isLoadingMore {
+            ProgressView()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 8)
+        } else if vm.canLoadMore {
+            Button {
+                Task { await vm.loadMore(api: appState.api) }
+            } label: {
+                Text("Показать ещё")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .padding(.top, 8)
         }
     }
 }

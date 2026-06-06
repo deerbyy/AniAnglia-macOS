@@ -78,7 +78,7 @@
 - `https://github.com/deerbyy/AniAnglia/tree/main/AniAnglia/Libraries/aateam/libanixart/include/anixart` — там лежат C++ заголовки с DTO и URL.
 - Или через `strings deerbyy/AniAnglia .../libanixart.a | grep '^/'`.
 
-## Что уже сделано (v0.9 — текущий статус)
+## Что уже сделано (v0.10 — текущий статус)
 
 **Скелет (v0.1):**
 - Каркас: SwiftUI, NavigationSplitView, сайдбар.
@@ -108,6 +108,7 @@
 - **Друзья профиля (v0.8)**: `GET /profile/friend/all/{profileId}/{page}`, `ProfilesResponse`, `ProfileRoute`. В профиле отображается горизонтальный список друзей с аватаром/online/status, кнопкой догрузки страниц и переходом на профиль друга. У чужого профиля счётчики списков не открывают локальные закладки текущего аккаунта.
 - **История просмотров (v0.4)**: новый таб в сайдбаре (`SidebarItem.history`), `Features/History/HistoryView.swift`. Требует авторизацию (`/history/{page}`).
 - **Автодогрузка длинных списков (v0.9)**: Search, Catalog, Collections, CollectionDetail и History вызывают `loadMoreIfNeeded` на последней карточке и показывают нижний spinner во время догрузки. Закладки не требуют отдельной автодогрузки в UI: `BookmarkSyncStore` уже забирает все страницы аккаунта для избранного, избранных коллекций и 5 категорий списков.
+- **Локальный поиск в библиотеке (v0.10)**: `BookmarksView` и `HistoryView` получили поисковые поля. Фильтрация идёт через `Release.matchesLibraryQuery` и `AnixartCollection.matchesLibraryQuery`: русское/оригинальное/альтернативное название, год, страна, студия, режиссёр, автор, описание, жанры, статус/категория; у коллекций — название, описание, автор и даты.
 - **Отметка серии просмотренной (v0.4)**: кнопка-галочка в `EpisodeRow`. Оптимистичный апдейт с откатом при ошибке. Авто-пометка при закрытии плеера.
 - **Мультиселект жанров (v0.5)**: `Features/Catalog/GenresPickerButton.swift` — popover с чекбоксами на 45 жанров из `Models/AnixartGenres.swift` (извлечены из iOS-источника `LibanixartApi.mm`). Переключатель «Исключить выбранные» (`is_genres_exclude_mode`).
 - **Отправка комментариев + лайки (v0.5)**: композер в `CommentsView` с TextEditor и спойлер-флагом. Под каждым комментарием — кнопки thumbs up/down (`/release/comment/vote/{id}/{value}`).
@@ -121,7 +122,6 @@
 - [ ] Заявки в друзья и управление дружбой (`/profile/friend/request/...`).
 - [ ] Настройки профиля (изменение логина/пароля, аватара).
 - [ ] Настоящая подпись + нотарификация для распространения вне Gatekeeper.
-- [ ] Поиск в истории/закладках.
 
 ## Как продолжать работу
 1. Клонируй: `git clone https://github.com/deerbyy/AniAnglia-macOS.git`

@@ -4,6 +4,7 @@ import SwiftUI
 final class BookmarksViewModel: ObservableObject {
     @Published var section: AccountLibrarySection = .favorites
     @Published var sort: ProfileListSort = .dateAddedNewest
+    @Published var searchQuery = ""
 
     func select(categoryId: Int) {
         guard let next = BookmarkCategory(rawValue: categoryId) else { return }
@@ -20,7 +21,8 @@ struct BookmarksView: View {
             appState: appState,
             syncStore: appState.bookmarkSync,
             section: $vm.section,
-            sort: $vm.sort
+            sort: $vm.sort,
+            searchQuery: $vm.searchQuery
         )
         .navigationTitle("Закладки")
         .task(id: appState.auth.profileId) {
@@ -65,6 +67,7 @@ private struct BookmarksContent: View {
     @ObservedObject var syncStore: BookmarkSyncStore
     @Binding var section: AccountLibrarySection
     @Binding var sort: ProfileListSort
+    @Binding var searchQuery: String
 
     private var sectionPicker: some View {
         Picker("", selection: $section) {
@@ -87,6 +90,28 @@ private struct BookmarksContent: View {
         .help("Порядок релизов в закладках Anixart")
     }
 
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Поиск в текущем списке", text: $searchQuery)
+                .textFieldStyle(.plain)
+            if !searchQuery.isEmpty {
+                Button {
+                    searchQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color.secondary.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
     @ViewBuilder
     private var content: some View {
         if !appState.auth.isAuthenticated {
@@ -102,16 +127,18 @@ private struct BookmarksContent: View {
                     .padding(.horizontal, 40)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if syncStore.isSyncing && releases.isEmpty && collections.isEmpty {
+        } else if syncStore.isSyncing && sourceReleases.isEmpty && sourceCollections.isEmpty {
             ProgressView().padding(40).frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let error = syncStore.errorMessage, releases.isEmpty && collections.isEmpty {
+        } else if let error = syncStore.errorMessage, sourceReleases.isEmpty && sourceCollections.isEmpty {
             ErrorState(message: error) {
                 Task { await reloadCurrentSection(force: true) }
             }
-        } else if releases.isEmpty && collections.isEmpty {
+        } else if sourceReleases.isEmpty && sourceCollections.isEmpty {
             Text("Список пуст")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if releases.isEmpty && collections.isEmpty {
+            emptySearchState
         } else if section == .favoriteCollections {
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16)], alignment: .leading, spacing: 22) {
@@ -143,6 +170,9 @@ private struct BookmarksContent: View {
         VStack(spacing: 0) {
             VStack(spacing: 8) {
                 sectionPicker
+                if appState.auth.isAuthenticated {
+                    searchField
+                }
                 HStack {
                     if let syncedAt = syncStore.lastSyncedAt {
                         Text("Синхронизировано: \(syncedAt.formatted(date: .omitted, time: .shortened))")
@@ -171,7 +201,29 @@ private struct BookmarksContent: View {
         }
     }
 
+    private var emptySearchState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 34))
+                .foregroundStyle(.secondary)
+            Text("Ничего не найдено")
+                .font(.headline)
+            Text("Попробуй изменить запрос или выбрать другой раздел.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private var releases: [Release] {
+        sourceReleases.filter { $0.matchesLibraryQuery(searchQuery) }
+    }
+
+    private var collections: [AnixartCollection] {
+        sourceCollections.filter { $0.matchesLibraryQuery(searchQuery) }
+    }
+
+    private var sourceReleases: [Release] {
         switch section {
         case .favorites:
             return syncStore.favoriteReleases
@@ -182,7 +234,7 @@ private struct BookmarksContent: View {
         }
     }
 
-    private var collections: [AnixartCollection] {
+    private var sourceCollections: [AnixartCollection] {
         switch section {
         case .favoriteCollections:
             return syncStore.favoriteCollections

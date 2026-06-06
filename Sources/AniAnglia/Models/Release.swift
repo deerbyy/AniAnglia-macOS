@@ -265,6 +265,27 @@ struct Release: Codable, Identifiable, Hashable {
             return lastSetDroppedDate
         }
     }
+
+    func matchesLibraryQuery(_ query: String) -> Bool {
+        let needle = query.normalizedLibrarySearchQuery
+        guard !needle.isEmpty else { return true }
+        return [
+            titleRu,
+            titleOriginal,
+            titleAlt,
+            year,
+            country,
+            studio,
+            director,
+            author,
+            description,
+            genres,
+            status?.name,
+            category?.name
+        ]
+        .compactMap { $0?.normalizedLibrarySearchQuery }
+        .contains { $0.contains(needle) }
+    }
 }
 
 enum BookmarkCategory: Int, CaseIterable, Identifiable, Hashable {
@@ -556,6 +577,13 @@ extension KeyedDecodingContainer where Key == ReleaseCodingKey {
             return value / 1_000
         }
         return value
+    }
+}
+
+extension String {
+    var normalizedLibrarySearchQuery: String {
+        folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "ru_RU"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

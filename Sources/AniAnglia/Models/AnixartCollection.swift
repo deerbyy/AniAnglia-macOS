@@ -122,6 +122,20 @@ struct AnixartCollection: Codable, Identifiable, Hashable {
         )
     }
 
+    func matchesLibraryQuery(_ query: String) -> Bool {
+        let needle = query.normalizedLibrarySearchQuery
+        guard !needle.isEmpty else { return true }
+        return [
+            title,
+            description,
+            creator?.displayName,
+            creationDate.map(String.init),
+            lastUpdateDate.map(String.init)
+        ]
+        .compactMap { $0?.normalizedLibrarySearchQuery }
+        .contains { $0.contains(needle) }
+    }
+
     static func == (lhs: AnixartCollection, rhs: AnixartCollection) -> Bool {
         lhs.id == rhs.id
     }
