@@ -79,6 +79,11 @@ final class CollectionsViewModel: ObservableObject {
         await load(api: api, reset: true)
     }
 
+    func loadMoreIfNeeded(current collection: AnixartCollection, api: AnixartAPI) async {
+        guard collection.id == collections.last?.id else { return }
+        await load(api: api, reset: false)
+    }
+
     private func loadPage(api: AnixartAPI, page: Int) async throws -> CollectionsResponse {
         switch mode {
         case .popular:
@@ -182,17 +187,20 @@ struct CollectionsView: View {
                             CollectionCard(collection: collection)
                         }
                         .buttonStyle(.plain)
+                        .onAppear {
+                            Task { await vm.loadMoreIfNeeded(current: collection, api: appState.api) }
+                        }
                     }
 
-                    if vm.canLoadMore {
+                    if vm.isLoadingMore {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 260, height: 146)
+                    } else if vm.canLoadMore {
                         Button {
                             Task { await vm.load(api: appState.api, reset: false) }
                         } label: {
-                            if vm.isLoadingMore {
-                                ProgressView().controlSize(.small)
-                            } else {
-                                Label("Загрузить ещё", systemImage: "arrow.down.circle")
-                            }
+                            Label("Загрузить ещё", systemImage: "arrow.down.circle")
                         }
                         .buttonStyle(.bordered)
                         .frame(width: 260, height: 146)

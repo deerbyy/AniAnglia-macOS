@@ -19,6 +19,15 @@ final class SearchViewModel: ObservableObject {
         return currentPage + 1 < totalPageCount
     }
 
+    func clear() {
+        currentTask?.cancel()
+        query = ""
+        results = []
+        errorMessage = nil
+        currentPage = 0
+        totalPageCount = nil
+    }
+
     func searchAfterDelay(api: AnixartAPI, searchBy: ReleaseSearchScope) {
         currentTask?.cancel()
         let q = query
@@ -63,12 +72,24 @@ final class SearchViewModel: ObservableObject {
         do {
             let nextPage = currentPage + 1
             let resp = try await api.searchReleases(query: trimmed, page: nextPage, searchBy: lastSearchBy)
-            results.append(contentsOf: resp.items)
+            results = deduplicated(results + resp.items)
             currentPage = nextPage
             totalPageCount = resp.totalPageCount ?? totalPageCount
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func loadMoreIfNeeded(current release: Release, api: AnixartAPI) async {
+        guard release.id == results.last?.id else { return }
+        await loadMore(api: api)
+    }
+
+    private func deduplicated(_ releases: [Release]) -> [Release] {
+        var seen = Set<Int64>()
+        return releases.filter { release in
+            seen.insert(release.id).inserted
         }
     }
 }
@@ -126,8 +147,7 @@ struct SearchView: View {
                     }
                 if !vm.query.isEmpty {
                     Button {
-                        vm.query = ""
-                        vm.results = []
+                        vm.clear()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)
@@ -192,19 +212,22 @@ struct SearchView: View {
                             ReleaseCard(release: release)
                         }
                         .buttonStyle(.plain)
+                        .onAppear {
+                            Task { await vm.loadMoreIfNeeded(current: release, api: appState.api) }
+                        }
                     }
                 }
                 .padding()
 
-                if vm.canLoadMore {
+                if vm.isLoadingMore {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.bottom, 24)
+                } else if vm.canLoadMore {
                     Button {
                         Task { await vm.loadMore(api: appState.api) }
                     } label: {
-                        if vm.isLoadingMore {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Показать ещё", systemImage: "chevron.down")
-                        }
+                        Label("Показать ещё", systemImage: "chevron.down")
                     }
                     .buttonStyle(.bordered)
                     .padding(.bottom, 24)

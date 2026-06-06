@@ -6,6 +6,7 @@ final class HistoryViewModel: ObservableObject {
     @Published var page = 0
     @Published var totalPages: Int?
     @Published var isLoading = false
+    @Published var isLoadingMore = false
     @Published var errorMessage: String?
 
     func reload(api: AnixartAPI) async {
@@ -24,23 +25,36 @@ final class HistoryViewModel: ObservableObject {
     }
 
     func loadMore(api: AnixartAPI) async {
-        guard !isLoading, canLoadMore else { return }
-        isLoading = true
+        guard canLoadMore else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
         let next = page + 1
         do {
             let resp = try await api.watchHistory(page: next)
-            releases.append(contentsOf: resp.items)
+            releases = deduplicated(releases + resp.items)
             page = next
             totalPages = resp.totalPageCount
         } catch {
             errorMessage = error.localizedDescription
         }
-        isLoading = false
     }
 
     var canLoadMore: Bool {
+        guard !isLoading, !isLoadingMore else { return false }
         guard let total = totalPages else { return false }
         return page + 1 < total
+    }
+
+    func loadMoreIfNeeded(current release: Release, api: AnixartAPI) async {
+        guard release.id == releases.last?.id else { return }
+        await loadMore(api: api)
+    }
+
+    private func deduplicated(_ releases: [Release]) -> [Release] {
+        var seen = Set<Int64>()
+        return releases.filter { release in
+            seen.insert(release.id).inserted
+        }
     }
 }
 
@@ -72,14 +86,21 @@ struct HistoryView: View {
                                 ReleaseCard(release: release)
                             }
                             .buttonStyle(.plain)
+                            .onAppear {
+                                Task { await vm.loadMoreIfNeeded(current: release, api: appState.api) }
+                            }
                         }
                     }
-                    if vm.canLoadMore {
+                    if vm.isLoadingMore {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 8)
+                    } else if vm.canLoadMore {
                         Button {
                             Task { await vm.loadMore(api: appState.api) }
                         } label: {
                             HStack {
-                                if vm.isLoading { ProgressView().controlSize(.small) }
                                 Text("Показать ещё")
                             }
                             .frame(maxWidth: .infinity)

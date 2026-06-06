@@ -110,6 +110,11 @@ final class CollectionDetailViewModel: ObservableObject {
         }
     }
 
+    func loadMoreIfNeeded(current release: Release, api: AnixartAPI, collectionId: Int64) async {
+        guard release.id == releases.last?.id else { return }
+        await loadMore(api: api, collectionId: collectionId)
+    }
+
     func setFavorite(api: AnixartAPI, syncStore: BookmarkSyncStore, collection: AnixartCollection, isFavorite: Bool) async {
         favoritePending = true
         defer { favoritePending = false }
@@ -283,17 +288,20 @@ struct CollectionDetailView: View {
                         ReleaseCard(release: release)
                     }
                     .buttonStyle(.plain)
+                    .onAppear {
+                        Task { await vm.loadMoreIfNeeded(current: release, api: appState.api, collectionId: collectionId) }
+                    }
                 }
 
-                if vm.canLoadMore {
+                if vm.isLoadingMore {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 160, height: 230)
+                } else if vm.canLoadMore {
                     Button {
                         Task { await vm.loadMore(api: appState.api, collectionId: collectionId) }
                     } label: {
-                        if vm.isLoadingMore {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Загрузить ещё", systemImage: "arrow.down.circle")
-                        }
+                        Label("Загрузить ещё", systemImage: "arrow.down.circle")
                     }
                     .buttonStyle(.bordered)
                     .frame(width: 160, height: 230)

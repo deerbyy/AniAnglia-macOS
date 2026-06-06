@@ -6,6 +6,7 @@ final class CatalogViewModel: ObservableObject {
     @Published var page = 0
     @Published var totalPages: Int?
     @Published var isLoading = false
+    @Published var isLoadingMore = false
     @Published var errorMessage: String?
 
     @Published var sort: Int = 3 // Popular
@@ -23,12 +24,20 @@ final class CatalogViewModel: ObservableObject {
     }
 
     func loadMore(api: AnixartAPI) async {
-        if isLoading { return }
-        isLoading = true
-        defer { isLoading = false }
+        guard canLoadMore() else { return }
+        let requestPage = page
+        if releases.isEmpty {
+            isLoading = true
+        } else {
+            isLoadingMore = true
+        }
+        defer {
+            isLoading = false
+            isLoadingMore = false
+        }
         do {
             let resp = try await api.filter(
-                page: page,
+                page: requestPage,
                 sort: sort,
                 category: category,
                 status: status,
@@ -37,7 +46,8 @@ final class CatalogViewModel: ObservableObject {
                 genres: Array(genres),
                 excludeGenres: excludeGenres
             )
-            releases.append(contentsOf: resp.items)
+            releases = deduplicated(releases + resp.items)
+            page = requestPage + 1
             totalPages = resp.totalPageCount
             errorMessage = nil
         } catch {
@@ -46,8 +56,22 @@ final class CatalogViewModel: ObservableObject {
     }
 
     func canLoadMore() -> Bool {
-        if let total = totalPages, total > 0 { return page + 1 < total }
+        guard !isLoading, !isLoadingMore else { return false }
+        if releases.isEmpty && page == 0 && totalPages == nil { return true }
+        if let total = totalPages, total > 0 { return page < total }
         return !releases.isEmpty
+    }
+
+    func loadMoreIfNeeded(current release: Release, api: AnixartAPI) async {
+        guard release.id == releases.last?.id else { return }
+        await loadMore(api: api)
+    }
+
+    private func deduplicated(_ releases: [Release]) -> [Release] {
+        var seen = Set<Int64>()
+        return releases.filter { release in
+            seen.insert(release.id).inserted
+        }
     }
 }
 
@@ -162,21 +186,23 @@ struct CatalogView: View {
                             ReleaseCard(release: release)
                         }
                         .buttonStyle(.plain)
+                        .onAppear {
+                            Task { await vm.loadMoreIfNeeded(current: release, api: appState.api) }
+                        }
                     }
                 }
                 .padding()
 
-                if vm.canLoadMore() {
+                if vm.isLoadingMore {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.bottom, 20)
+                } else if vm.canLoadMore() {
                     Button {
-                        vm.page += 1
                         Task { await vm.loadMore(api: appState.api) }
                     } label: {
-                        if vm.isLoading {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Text("Показать ещё")
-                                .padding(.horizontal, 24)
-                        }
+                        Text("Показать ещё")
+                            .padding(.horizontal, 24)
                     }
                     .buttonStyle(.bordered)
                     .padding(.bottom, 20)
