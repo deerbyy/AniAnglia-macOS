@@ -241,6 +241,29 @@ struct Profile: Codable, Identifiable, Hashable {
     }
 }
 
+struct ProfileRoute: Hashable {
+    let id: Int64
+    let prefetchedProfile: Profile?
+
+    init(id: Int64, prefetchedProfile: Profile? = nil) {
+        self.id = id
+        self.prefetchedProfile = prefetchedProfile
+    }
+
+    init(_ profile: Profile) {
+        self.id = profile.id
+        self.prefetchedProfile = profile
+    }
+
+    static func == (lhs: ProfileRoute, rhs: ProfileRoute) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
 struct ProfileRole: Codable, Identifiable, Hashable {
     let id: Int64
     let name: String
@@ -314,6 +337,34 @@ struct ProfileResponse: Decodable, CodedResponse {
     }
 
     enum CodingKeys: String, CodingKey { case code, message, profile }
+}
+
+struct ProfilesResponse: Decodable, CodedResponse {
+    let code: Int
+    let message: String?
+    let profiles: [Profile]
+    let content: [Profile]
+    let totalCount: Int?
+    let totalPageCount: Int?
+    let currentPage: Int?
+
+    var items: [Profile] {
+        profiles.isEmpty ? content : profiles
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: ProfileCodingKey.self)
+        code = c.decodeInt("code") ?? 0
+        message = c.decodeString("message")
+        profiles = (try? c.decodeIfPresent([Profile].self, forKey: "profiles"))
+            ?? (try? c.decodeIfPresent([Profile].self, forKey: "friends"))
+            ?? (try? c.decodeIfPresent([Profile].self, forKey: "users"))
+            ?? []
+        content = (try? c.decodeIfPresent([Profile].self, forKey: "content")) ?? []
+        totalCount = c.decodeInt("total_count") ?? c.decodeInt("totalCount")
+        totalPageCount = c.decodeInt("total_page_count") ?? c.decodeInt("totalPageCount")
+        currentPage = c.decodeInt("current_page") ?? c.decodeInt("currentPage")
+    }
 }
 
 struct SignInResponse: Decodable, CodedResponse {

@@ -12,7 +12,7 @@ Native macOS client for the Anixart anime catalog. The app is SwiftUI-first, tar
 - Login/password auth with token/profile id stored in local app preferences. CI artifacts are ad-hoc signed, so avoiding Keychain access prevents password dialogs after each newly installed build.
 - Anonymous browsing mode by default.
 - Account-backed bookmark sync for Anixart favorites, favorite collections, and all five watch lists: "Смотрю", "В планах", "Просмотрено", "Отложено", "Брошено"; release lists default to newest-added first and expose Anixart sort modes.
-- Expanded Anixart account profile mapping: username/avatar, privacy flags, social links, list counts, favorites, watched episodes, comments, collections, videos, friends, rating score, and watched time.
+- Expanded Anixart account profile mapping: username/avatar, privacy flags, social links, list counts, favorites, watched episodes, comments, collections, videos, friends list, rating score, and watched time.
 - Profile screen and settings for appearance, data cache, playback defaults, help, and rules.
 
 ## Screenshots
@@ -51,6 +51,7 @@ Screenshots should be captured from the first full Xcode/CI run and added here w
 - `GET /profile/list/delete/{list_id}/{release_id}`
 - `GET /profile/list/all/{profile_id}/{list_id}/{page}`
 - `GET /profile/{profile_id}`
+- `GET /profile/friend/all/{profile_id}/{page}`
 
 `POST /search/releases/{page}` uses a JSON body, for example `{"query":"naruto","searchBy":0}`.
 

@@ -302,6 +302,10 @@ extension AnixartAPI {
         return profile
     }
 
+    func profileFriends(profileId: Int64, page: Int = 0) async throws -> ProfilesResponse {
+        try await get("profile/friend/all/\(profileId)/\(page)")
+    }
+
     // MARK: - Auth
 
     func signIn(login: String, password: String) async throws -> SignInResponse {

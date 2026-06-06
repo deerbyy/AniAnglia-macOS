@@ -35,6 +35,9 @@ struct ContentView: View {
                 .navigationDestination(for: CollectionRoute.self) { route in
                     CollectionDetailView(collectionId: route.id, prefetched: route.prefetchedCollection)
                 }
+                .navigationDestination(for: ProfileRoute.self) { route in
+                    ProfileView(profileId: route.id, prefetched: route.prefetchedProfile)
+                }
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
