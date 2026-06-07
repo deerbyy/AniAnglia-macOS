@@ -34,6 +34,21 @@ struct Video: Codable, Identifiable, Hashable {
         normalizedURL(from: playerUrl ?? url)
     }
 
+    func matchesVideoQuery(_ query: String) -> Bool {
+        let needle = query.normalizedLibrarySearchQuery
+        guard !needle.isEmpty else { return true }
+        return [
+            title,
+            hosting?.name,
+            url,
+            playerUrl,
+            resolvedPlayerURL?.host,
+            externalBrowserURL?.host
+        ]
+        .compactMap { $0?.normalizedLibrarySearchQuery }
+        .contains { $0.contains(needle) }
+    }
+
     private func normalizedURL(from raw: String?) -> URL? {
         guard var s = raw, !s.isEmpty else { return nil }
         if s.hasPrefix("//") { s = "https:" + s }

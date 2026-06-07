@@ -17,6 +17,8 @@ final class ReleaseDetailViewModel: ObservableObject {
     @Published var relatedCollectionsSort: CollectionSort = .yearPopular
     @Published var relatedCollectionsSearchQuery = ""
     @Published var isLoadingMoreRelatedCollections = false
+    @Published var selectedVideoCategoryId: Int?
+    @Published var videoSearchQuery = ""
 
     private var relatedCollectionsPage = 0
     private var relatedCollectionsTotalPageCount: Int?
@@ -32,6 +34,34 @@ final class ReleaseDetailViewModel: ObservableObject {
 
     var canLoadMoreRelatedCollections: Bool {
         !isLoading && !isLoadingMoreRelatedCollections && !relatedCollectionsReachedEnd
+    }
+
+    var filteredVideoBlocks: [VideoBlock] {
+        let needle = videoSearchQuery.normalizedLibrarySearchQuery
+        return videoBlocks.compactMap { block in
+            if let selectedVideoCategoryId, block.category.id != selectedVideoCategoryId {
+                return nil
+            }
+            let categoryMatches = !needle.isEmpty
+                && block.category.name.normalizedLibrarySearchQuery.contains(needle)
+            let videos = categoryMatches
+                ? block.videos
+                : block.videos.filter { $0.matchesVideoQuery(videoSearchQuery) }
+            guard !videos.isEmpty else { return nil }
+            return VideoBlock(category: block.category, videos: videos)
+        }
+    }
+
+    var totalVideoCount: Int {
+        videoBlocks.reduce(0) { $0 + $1.videos.count }
+    }
+
+    var filteredVideoCount: Int {
+        filteredVideoBlocks.reduce(0) { $0 + $1.videos.count }
+    }
+
+    var hasVideoSearchQuery: Bool {
+        !videoSearchQuery.normalizedLibrarySearchQuery.isEmpty
     }
 
     func load(api: AnixartAPI, releaseId: Int64) async {
@@ -402,9 +432,26 @@ struct ReleaseDetailView: View {
     }
 
     private var videosSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Видео").font(.title3.bold())
-            ForEach(vm.videoBlocks) { block in
+        let visibleBlocks = vm.filteredVideoBlocks
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("Видео")
+                    .font(.title3.bold())
+                Text("\(vm.filteredVideoCount)/\(vm.totalVideoCount)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            videoControls
+
+            if visibleBlocks.isEmpty {
+                Text("По этому запросу видео не найдены.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(visibleBlocks) { block in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(block.category.name)
                         .font(.headline)
@@ -423,6 +470,49 @@ struct ReleaseDetailView: View {
                 }
             }
         }
+    }
+
+    private var videoControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                videoSearchField
+                if vm.videoBlocks.count > 1 {
+                    Picker("Категория", selection: $vm.selectedVideoCategoryId) {
+                        Text("Все категории").tag(Int?.none)
+                        ForEach(vm.videoBlocks) { block in
+                            Text(block.category.name).tag(Int?.some(block.category.id))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 220)
+                }
+                Spacer()
+            }
+        }
+    }
+
+    private var videoSearchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Поиск по видео", text: $vm.videoSearchQuery)
+                .textFieldStyle(.plain)
+            if !vm.videoSearchQuery.isEmpty {
+                Button {
+                    vm.videoSearchQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Очистить поиск")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: 360, alignment: .leading)
     }
 
     private var relatedCollectionsSection: some View {
