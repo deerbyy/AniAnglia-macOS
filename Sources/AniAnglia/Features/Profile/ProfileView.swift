@@ -1,5 +1,13 @@
 import SwiftUI
 
+private enum ProfilePreviewSection: Hashable {
+    case votes
+    case history
+    case collections
+    case comments
+    case videos
+}
+
 @MainActor
 final class ProfileViewModel: ObservableObject {
     @Published var profile: Profile?
@@ -249,6 +257,7 @@ struct ProfileView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm = ProfileViewModel()
     @State private var playingProfileVideo: Video?
+    @State private var expandedPreviewSections: Set<ProfilePreviewSection> = []
 
     init(profileId: Int64? = nil, prefetched: Profile? = nil) {
         self.profileId = profileId
@@ -265,6 +274,7 @@ struct ProfileView: View {
         }
         .navigationTitle(navigationTitle)
         .task(id: taskID) {
+            expandedPreviewSections = []
             vm.setPrefetchedProfile(prefetched)
             guard let id = effectiveProfileId else { return }
             await vm.loadProfile(id: id, api: appState.api)
@@ -657,8 +667,8 @@ struct ProfileView: View {
                 friendRequestsSection
             }
             friendsSection(for: profile)
-            releasePreviewSection(title: "Оценки релизов", icon: "star.leadinghalf.filled", releases: profile.votes)
-            releasePreviewSection(title: "Просмотрено недавно", icon: "clock.arrow.circlepath", releases: profile.history)
+            releasePreviewSection(section: .votes, title: "Оценки релизов", icon: "star.leadinghalf.filled", releases: profile.votes)
+            releasePreviewSection(section: .history, title: "Просмотрено недавно", icon: "clock.arrow.circlepath", releases: profile.history)
             collectionsPreviewSection(for: profile)
             commentsPreviewSection(for: profile)
             videosPreviewSection(for: profile)
@@ -900,14 +910,23 @@ struct ProfileView: View {
     }
 
     @ViewBuilder
-    private func releasePreviewSection(title: String, icon: String, releases: [Release]) -> some View {
+    private func releasePreviewSection(section: ProfilePreviewSection, title: String, icon: String, releases: [Release]) -> some View {
         if !releases.isEmpty {
+            let limit = 10
+            let isExpanded = isPreviewSectionExpanded(section)
+            let visibleReleases = isExpanded ? releases : Array(releases.prefix(limit))
             VStack(alignment: .leading, spacing: 10) {
-                Label(title, systemImage: icon)
-                    .font(.title3.bold())
+                previewSectionHeader(
+                    section: section,
+                    title: title,
+                    icon: icon,
+                    visibleCount: visibleReleases.count,
+                    totalCount: releases.count,
+                    limit: limit
+                )
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 14) {
-                        ForEach(Array(releases.prefix(10))) { release in
+                        ForEach(visibleReleases) { release in
                             NavigationLink(value: release) {
                                 ReleaseCard(release: release)
                                     .frame(width: 160)
@@ -952,12 +971,21 @@ struct ProfileView: View {
     @ViewBuilder
     private func collectionsPreviewSection(for profile: Profile) -> some View {
         if !profile.collectionsPreview.isEmpty {
+            let limit = 10
+            let isExpanded = isPreviewSectionExpanded(.collections)
+            let visibleCollections = isExpanded ? profile.collectionsPreview : Array(profile.collectionsPreview.prefix(limit))
             VStack(alignment: .leading, spacing: 10) {
-                Label("Коллекции профиля", systemImage: "rectangle.stack")
-                    .font(.title3.bold())
+                previewSectionHeader(
+                    section: .collections,
+                    title: "Коллекции профиля",
+                    icon: "rectangle.stack",
+                    visibleCount: visibleCollections.count,
+                    totalCount: profile.collectionsPreview.count,
+                    limit: limit
+                )
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 14) {
-                        ForEach(Array(profile.collectionsPreview.prefix(10))) { collection in
+                        ForEach(visibleCollections) { collection in
                             NavigationLink(value: CollectionRoute(collection)) {
                                 CollectionCard(collection: collection, style: .compact)
                             }
@@ -972,13 +1000,22 @@ struct ProfileView: View {
 
     @ViewBuilder
     private func commentsPreviewSection(for profile: Profile) -> some View {
-        let comments = Array((profile.releaseCommentsPreview + profile.commentsPreview).uniquedById().prefix(6))
-        if !comments.isEmpty {
+        let allComments = (profile.releaseCommentsPreview + profile.commentsPreview).uniquedById()
+        if !allComments.isEmpty {
+            let limit = 6
+            let isExpanded = isPreviewSectionExpanded(.comments)
+            let visibleComments = isExpanded ? allComments : Array(allComments.prefix(limit))
             VStack(alignment: .leading, spacing: 10) {
-                Label("Комментарии профиля", systemImage: "text.bubble")
-                    .font(.title3.bold())
+                previewSectionHeader(
+                    section: .comments,
+                    title: "Комментарии профиля",
+                    icon: "text.bubble",
+                    visibleCount: visibleComments.count,
+                    totalCount: allComments.count,
+                    limit: limit
+                )
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(comments) { comment in
+                    ForEach(visibleComments) { comment in
                         if let release = comment.release {
                             NavigationLink(value: release) {
                                 ProfileCommentPreviewRow(comment: comment)
@@ -1001,12 +1038,21 @@ struct ProfileView: View {
     @ViewBuilder
     private func videosPreviewSection(for profile: Profile) -> some View {
         if !profile.releaseVideosPreview.isEmpty {
+            let limit = 10
+            let isExpanded = isPreviewSectionExpanded(.videos)
+            let visibleVideos = isExpanded ? profile.releaseVideosPreview : Array(profile.releaseVideosPreview.prefix(limit))
             VStack(alignment: .leading, spacing: 10) {
-                Label("Видео профиля", systemImage: "film")
-                    .font(.title3.bold())
+                previewSectionHeader(
+                    section: .videos,
+                    title: "Видео профиля",
+                    icon: "film",
+                    visibleCount: visibleVideos.count,
+                    totalCount: profile.releaseVideosPreview.count,
+                    limit: limit
+                )
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 14) {
-                        ForEach(Array(profile.releaseVideosPreview.prefix(10))) { video in
+                        ForEach(visibleVideos) { video in
                             Button {
                                 playingProfileVideo = video
                             } label: {
@@ -1020,6 +1066,48 @@ struct ProfileView: View {
                     .padding(.bottom, 4)
                 }
             }
+        }
+    }
+
+    private func previewSectionHeader(
+        section: ProfilePreviewSection,
+        title: String,
+        icon: String,
+        visibleCount: Int,
+        totalCount: Int,
+        limit: Int
+    ) -> some View {
+        HStack(spacing: 10) {
+            Label(title, systemImage: icon)
+                .font(.title3.bold())
+            Text("\(visibleCount)/\(totalCount)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            Spacer()
+            if totalCount > limit {
+                Button {
+                    togglePreviewSection(section)
+                } label: {
+                    Label(
+                        isPreviewSectionExpanded(section) ? "Свернуть" : "Показать все",
+                        systemImage: isPreviewSectionExpanded(section) ? "chevron.up" : "chevron.down"
+                    )
+                }
+                .buttonStyle(.borderless)
+                .help(isPreviewSectionExpanded(section) ? "Свернуть секцию" : "Показать все элементы секции")
+            }
+        }
+    }
+
+    private func isPreviewSectionExpanded(_ section: ProfilePreviewSection) -> Bool {
+        expandedPreviewSections.contains(section)
+    }
+
+    private func togglePreviewSection(_ section: ProfilePreviewSection) {
+        if expandedPreviewSections.contains(section) {
+            expandedPreviewSections.remove(section)
+        } else {
+            expandedPreviewSections.insert(section)
         }
     }
 
