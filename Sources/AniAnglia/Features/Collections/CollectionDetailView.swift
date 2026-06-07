@@ -10,6 +10,7 @@ final class CollectionDetailViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var isFavorite = false
     @Published var favoritePending = false
+    @Published var releaseSearchQuery = ""
 
     private var page = 0
     private var totalPageCount: Int?
@@ -19,6 +20,14 @@ final class CollectionDetailViewModel: ObservableObject {
 
     var canLoadMore: Bool {
         !isLoading && !isLoadingMore && !reachedEnd
+    }
+
+    var filteredReleases: [Release] {
+        releases.filter { $0.matchesLibraryQuery(releaseSearchQuery) }
+    }
+
+    var hasReleaseSearchQuery: Bool {
+        !releaseSearchQuery.normalizedLibrarySearchQuery.isEmpty
     }
 
     func load(api: AnixartAPI, collectionId: Int64, prefetched: AnixartCollection?, force: Bool = false) async {
@@ -199,7 +208,7 @@ struct CollectionDetailView: View {
                         .shadow(radius: 2)
                     HStack(spacing: 10) {
                         if let creator = collection.creator {
-                            Label(creator.displayName, systemImage: "person.crop.circle")
+                            creatorLink(creator)
                         }
                         if let favoriteCount = collection.favoriteCount {
                             Label("\(favoriteCount)", systemImage: "star")
@@ -230,6 +239,19 @@ struct CollectionDetailView: View {
             if let info = vm.info {
                 stats(info)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func creatorLink(_ creator: Profile) -> some View {
+        if creator.id > 0 {
+            NavigationLink(value: ProfileRoute(creator)) {
+                Label(creator.displayName, systemImage: "person.crop.circle")
+            }
+            .buttonStyle(.plain)
+            .help("Открыть профиль автора")
+        } else {
+            Label(creator.displayName, systemImage: "person.crop.circle")
         }
     }
 
@@ -280,15 +302,37 @@ struct CollectionDetailView: View {
     }
 
     private var releasesSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Релизы").font(.title3.bold())
+        let visibleReleases = vm.filteredReleases
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Релизы")
+                    .font(.title3.bold())
+                Text("\(visibleReleases.count)/\(vm.releases.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            if vm.releases.count > 8 || vm.hasReleaseSearchQuery {
+                collectionReleaseSearchField
+            }
+
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 16)], alignment: .leading, spacing: 20) {
-                ForEach(vm.releases) { release in
+                if visibleReleases.isEmpty {
+                    Text("По этому запросу ничего не найдено.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(width: 160, height: 230)
+                }
+
+                ForEach(visibleReleases) { release in
                     NavigationLink(value: release) {
                         ReleaseCard(release: release)
                     }
                     .buttonStyle(.plain)
                     .onAppear {
+                        guard !vm.hasReleaseSearchQuery else { return }
                         Task { await vm.loadMoreIfNeeded(current: release, api: appState.api, collectionId: collectionId) }
                     }
                 }
@@ -308,5 +352,29 @@ struct CollectionDetailView: View {
                 }
             }
         }
+    }
+
+    private var collectionReleaseSearchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Поиск в коллекции", text: $vm.releaseSearchQuery)
+                .textFieldStyle(.plain)
+            if !vm.releaseSearchQuery.isEmpty {
+                Button {
+                    vm.releaseSearchQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Очистить поиск")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: 360, alignment: .leading)
     }
 }
