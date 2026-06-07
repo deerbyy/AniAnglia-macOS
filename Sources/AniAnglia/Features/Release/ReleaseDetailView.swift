@@ -458,11 +458,32 @@ struct ReleaseDetailView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 24) {
-            RemoteImage(url: effectiveRelease?.posterURL, contentMode: .fill) {
-                Rectangle().fill(Color.secondary.opacity(0.1))
+            Button {
+                if let posterURL = effectiveRelease?.posterURL {
+                    fullscreenIndex = 0
+                    fullscreenScreenshots = [posterURL]
+                }
+            } label: {
+                ZStack(alignment: .bottomTrailing) {
+                    RemoteImage(url: effectiveRelease?.posterURL, contentMode: .fill) {
+                        Rectangle().fill(Color.secondary.opacity(0.1))
+                    }
+                    .frame(width: 220, height: 320)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+
+                    if effectiveRelease?.posterURL != nil {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.caption.bold())
+                            .padding(7)
+                            .background(.regularMaterial)
+                            .clipShape(Circle())
+                            .padding(10)
+                    }
+                }
             }
-            .frame(width: 220, height: 320)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .buttonStyle(.plain)
+            .disabled(effectiveRelease?.posterURL == nil)
+            .help("Открыть обложку")
             .shadow(radius: 8)
 
             VStack(alignment: .leading, spacing: 12) {
@@ -487,13 +508,6 @@ struct ReleaseDetailView: View {
                                 }
                             }
                         }
-                    }
-                    FlowLayout(spacing: 8, rowSpacing: 8) {
-                        if let year = release.year { Tag(text: year, systemImage: "calendar") }
-                        if let status = release.status?.name { Tag(text: status, systemImage: "dot.radiowaves.left.and.right") }
-                        if let category = release.category?.name { Tag(text: category, systemImage: "rectangle.on.rectangle") }
-                        if let grade = release.grade { Tag(text: String(format: "%.2f", grade), systemImage: "star.fill", tint: .yellow) }
-                        if let voteCount = release.voteCount { Tag(text: "\(voteCount) оценок", systemImage: "person.2") }
                     }
                     releaseSummaryGrid(for: release)
                     if appState.auth.isAuthenticated {
@@ -620,10 +634,12 @@ struct ReleaseDetailView: View {
 
     private func releaseSummaryGrid(for release: Release) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 10)], alignment: .leading, spacing: 10) {
+            releaseMetric("Год", release.year, "calendar", .secondary)
             releaseMetric("Оценка", release.grade.map { String(format: "%.2f", $0) }, "star.fill", .yellow)
             releaseMetric("Серии", episodeProgressText(for: release), "play.rectangle", .accentColor)
             releaseMetric("Тип", release.category?.name, "rectangle.on.rectangle", .secondary)
             releaseMetric("Статус", release.status?.name, "dot.radiowaves.left.and.right", .secondary)
+            releaseMetric("Голосов", release.voteCount.map(String.init), "person.2", .secondary)
         }
         .frame(maxWidth: 620, alignment: .leading)
     }
@@ -681,18 +697,20 @@ struct ReleaseDetailView: View {
 
     private func releaseInfoItems(for release: Release) -> [ReleaseInfoItem] {
         [
-            ReleaseInfoItem(title: "Оригинальное", value: release.titleOriginal, icon: "character.book.closed"),
-            ReleaseInfoItem(title: "Альтернативное", value: release.titleAlt, icon: "textformat.abc"),
-            ReleaseInfoItem(title: "Год выхода", value: release.year, icon: "calendar"),
-            ReleaseInfoItem(title: "Формат", value: release.category?.name, icon: "rectangle.on.rectangle"),
-            ReleaseInfoItem(title: "Статус", value: release.status?.name, icon: "dot.radiowaves.left.and.right"),
-            ReleaseInfoItem(title: "Серии", value: episodeProgressText(for: release), icon: "play.rectangle"),
+            ReleaseInfoItem(
+                title: "Оригинальное",
+                value: release.titleOriginal == release.displayTitle ? nil : release.titleOriginal,
+                icon: "character.book.closed"
+            ),
+            ReleaseInfoItem(
+                title: "Альтернативное",
+                value: release.titleAlt == release.displayTitle || release.titleAlt == release.titleOriginal ? nil : release.titleAlt,
+                icon: "textformat.abc"
+            ),
             ReleaseInfoItem(title: "Студия", value: release.studio, icon: "building.2"),
             ReleaseInfoItem(title: "Страна", value: release.country, icon: "globe.europe.africa"),
             ReleaseInfoItem(title: "Автор", value: release.author, icon: "pencil"),
-            ReleaseInfoItem(title: "Режиссёр", value: release.director, icon: "megaphone"),
-            ReleaseInfoItem(title: "Оценка", value: release.grade.map { String(format: "%.2f", $0) }, icon: "star"),
-            ReleaseInfoItem(title: "Голосов", value: release.voteCount.map(String.init), icon: "person.2")
+            ReleaseInfoItem(title: "Режиссёр", value: release.director, icon: "megaphone")
         ].compactMap { $0 }
     }
 
