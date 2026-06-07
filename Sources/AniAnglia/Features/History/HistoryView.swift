@@ -1,5 +1,68 @@
 import SwiftUI
 
+enum HistoryLibraryFilter: Hashable, Identifiable {
+    case all
+    case favorites
+    case inAnyList
+    case notInLibrary
+    case list(BookmarkCategory)
+
+    var id: String {
+        switch self {
+        case .all: return "all"
+        case .favorites: return "favorites"
+        case .inAnyList: return "in-any-list"
+        case .notInLibrary: return "not-in-library"
+        case .list(let category): return "list-\(category.rawValue)"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .all: return "Вся история"
+        case .favorites: return "Избранное"
+        case .inAnyList: return "В списках"
+        case .notInLibrary: return "Без списка"
+        case .list(let category): return category.title
+        }
+    }
+
+    static let displayOrder: [HistoryLibraryFilter] = [
+        .all,
+        .favorites,
+        .inAnyList,
+        .notInLibrary
+    ] + BookmarkCategory.displayOrder.map(HistoryLibraryFilter.list)
+
+    @MainActor
+    func includes(_ release: Release, syncStore: BookmarkSyncStore) -> Bool {
+        switch self {
+        case .all:
+            return true
+        case .favorites:
+            let apiFlag = release.isFavorite == true
+            let syncedFlag = syncStore.favoriteReleases.contains { $0.id == release.id }
+            return apiFlag || syncedFlag
+        case .inAnyList:
+            let apiFlag = release.profileListStatus != nil
+            let syncedFlag = syncStore.allReleases.contains { $0.id == release.id }
+            return apiFlag || syncedFlag
+        case .notInLibrary:
+            let apiFavoriteFlag = release.isFavorite == true
+            let syncedFavoriteFlag = syncStore.favoriteReleases.contains { $0.id == release.id }
+            let isFavorite = apiFavoriteFlag || syncedFavoriteFlag
+            let apiListFlag = release.profileListStatus != nil
+            let syncedListFlag = syncStore.allReleases.contains { $0.id == release.id }
+            let isInList = apiListFlag || syncedListFlag
+            return !isFavorite && !isInList
+        case .list(let category):
+            let apiFlag = release.profileListStatus == category.rawValue
+            let syncedFlag = syncStore.releases(for: category).contains { $0.id == release.id }
+            return apiFlag || syncedFlag
+        }
+    }
+}
+
 @MainActor
 final class HistoryViewModel: ObservableObject {
     @Published var releases: [Release] = []
@@ -9,13 +72,22 @@ final class HistoryViewModel: ObservableObject {
     @Published var isLoadingMore = false
     @Published var errorMessage: String?
     @Published var searchQuery = ""
+    @Published var libraryFilter: HistoryLibraryFilter = .all
 
-    var filteredReleases: [Release] {
+    var searchedReleases: [Release] {
         releases.filter { $0.matchesLibraryQuery(searchQuery) }
     }
 
     var isSearching: Bool {
         !searchQuery.normalizedLibrarySearchQuery.isEmpty
+    }
+
+    var isFiltering: Bool {
+        libraryFilter != .all
+    }
+
+    func visibleReleases(syncStore: BookmarkSyncStore) -> [Release] {
+        searchedReleases.filter { libraryFilter.includes($0, syncStore: syncStore) }
     }
 
     func reload(api: AnixartAPI) async {
@@ -74,6 +146,7 @@ struct HistoryView: View {
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 16)]
 
     var body: some View {
+        let visibleReleases = vm.visibleReleases(syncStore: appState.bookmarkSync)
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if !appState.auth.isAuthenticated {
@@ -91,16 +164,30 @@ struct HistoryView: View {
                     ContentUnavailable(systemImage: "clock",
                                        title: "История пуста",
                                        message: "Когда отметишь хотя бы одну серию просмотренной, релиз появится здесь.")
-                } else if vm.filteredReleases.isEmpty {
-                    searchField
+                } else if visibleReleases.isEmpty {
+                    controls
                     ContentUnavailable(systemImage: "magnifyingglass",
                                        title: "Ничего не найдено",
-                                       message: "Попробуй изменить запрос или догрузить историю ниже.")
+                                       message: emptyFilteredMessage)
                     paginationFooter
                 } else {
-                    searchField
+                    controls
+                    HStack(spacing: 10) {
+                        Text("\(visibleReleases.count) из \(vm.releases.count)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                        if vm.isFiltering || vm.isSearching {
+                            Button("Сбросить фильтры") {
+                                vm.searchQuery = ""
+                                vm.libraryFilter = .all
+                            }
+                            .buttonStyle(.borderless)
+                            .controlSize(.small)
+                        }
+                        Spacer()
+                    }
                     LazyVGrid(columns: columns, spacing: 18) {
-                        ForEach(vm.filteredReleases) { release in
+                        ForEach(visibleReleases) { release in
                             NavigationLink(value: release) {
                                 ReleaseCard(release: release)
                             }
@@ -109,7 +196,7 @@ struct HistoryView: View {
                                 Task {
                                     await vm.loadMoreIfNeeded(
                                         current: release,
-                                        visibleReleases: vm.filteredReleases,
+                                        visibleReleases: visibleReleases,
                                         api: appState.api
                                     )
                                 }
@@ -135,6 +222,34 @@ struct HistoryView: View {
         .task(id: appState.auth.profileId) {
             if appState.auth.isAuthenticated && vm.releases.isEmpty {
                 await vm.reload(api: appState.api)
+                await appState.bookmarkSync.syncAll(api: appState.api)
+            }
+        }
+    }
+
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            searchField
+            HStack(spacing: 8) {
+                Text("Фильтр")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("Фильтр истории", selection: $vm.libraryFilter) {
+                    ForEach(HistoryLibraryFilter.displayOrder) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                Spacer()
+                if appState.bookmarkSync.isSyncing {
+                    ProgressView()
+                        .controlSize(.small)
+                } else if let syncedAt = appState.bookmarkSync.lastSyncedAt {
+                    Text("Закладки: \(syncedAt.formatted(date: .omitted, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -159,6 +274,16 @@ struct HistoryView: View {
         .padding(.vertical, 7)
         .background(Color.secondary.opacity(0.1))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var emptyFilteredMessage: String {
+        if vm.isSearching && vm.isFiltering {
+            return "Попробуй изменить запрос, сбросить фильтр или догрузить историю ниже."
+        }
+        if vm.isFiltering {
+            return "В загруженной истории нет релизов для выбранного фильтра. Можно догрузить историю ниже."
+        }
+        return "Попробуй изменить запрос или догрузить историю ниже."
     }
 
     @ViewBuilder
