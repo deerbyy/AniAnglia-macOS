@@ -14,6 +14,25 @@ final class ReleaseDetailViewModel: ObservableObject {
     @Published var favoritePending = false
     @Published var userVote: Int = 0 // 0 = none, 1..5 stars
     @Published var votePending = false
+    @Published var relatedCollectionsSort: CollectionSort = .yearPopular
+    @Published var relatedCollectionsSearchQuery = ""
+    @Published var isLoadingMoreRelatedCollections = false
+
+    private var relatedCollectionsPage = 0
+    private var relatedCollectionsTotalPageCount: Int?
+    private var relatedCollectionsReachedEnd = false
+
+    var filteredRelatedCollections: [AnixartCollection] {
+        relatedCollections.filter { $0.matchesLibraryQuery(relatedCollectionsSearchQuery) }
+    }
+
+    var hasRelatedCollectionsSearchQuery: Bool {
+        !relatedCollectionsSearchQuery.normalizedLibrarySearchQuery.isEmpty
+    }
+
+    var canLoadMoreRelatedCollections: Bool {
+        !isLoading && !isLoadingMoreRelatedCollections && !relatedCollectionsReachedEnd
+    }
 
     func load(api: AnixartAPI, releaseId: Int64) async {
         isLoading = true
@@ -25,10 +44,6 @@ final class ReleaseDetailViewModel: ObservableObject {
             do { return try await api.videoBlocks(releaseId: releaseId).blocks }
             catch { return [] }
         }()
-        let loadedCollections: [AnixartCollection] = await {
-            do { return try await api.releaseCollections(releaseId: releaseId, page: 0, sort: .yearPopular).items }
-            catch { return [] }
-        }()
         if let loadedRelease {
             release = loadedRelease
             bookmarkCategory = loadedRelease.profileListStatus
@@ -36,11 +51,52 @@ final class ReleaseDetailViewModel: ObservableObject {
             userVote = loadedRelease.yourVote ?? 0
         }
         videoBlocks = loadedBlocks
-        relatedCollections = loadedCollections
+        await loadRelatedCollections(api: api, releaseId: releaseId, reset: true)
         if release == nil && errorMessage == nil {
             errorMessage = "Не удалось загрузить релиз"
         }
         isLoading = false
+    }
+
+    func loadRelatedCollections(api: AnixartAPI, releaseId: Int64, reset: Bool = false) async {
+        if reset {
+            relatedCollectionsPage = 0
+            relatedCollectionsTotalPageCount = nil
+            relatedCollectionsReachedEnd = false
+            relatedCollections = []
+        } else {
+            guard canLoadMoreRelatedCollections else { return }
+            isLoadingMoreRelatedCollections = true
+        }
+        defer { isLoadingMoreRelatedCollections = false }
+
+        do {
+            let page = relatedCollectionsPage
+            let response = try await api.releaseCollections(
+                releaseId: releaseId,
+                page: page,
+                sort: relatedCollectionsSort
+            )
+            let incoming = response.items
+            relatedCollections = deduplicatedCollections(reset ? incoming : relatedCollections + incoming)
+            relatedCollectionsTotalPageCount = response.totalPageCount
+            if let relatedCollectionsTotalPageCount {
+                relatedCollectionsReachedEnd = page + 1 >= relatedCollectionsTotalPageCount
+            } else {
+                relatedCollectionsReachedEnd = incoming.isEmpty
+            }
+            relatedCollectionsPage = page + 1
+        } catch {
+            if !reset {
+                bookmarkError = error.localizedDescription
+            }
+        }
+    }
+
+    func changeRelatedCollectionsSort(_ sort: CollectionSort, api: AnixartAPI, releaseId: Int64) async {
+        guard sort != relatedCollectionsSort else { return }
+        relatedCollectionsSort = sort
+        await loadRelatedCollections(api: api, releaseId: releaseId, reset: true)
     }
 
     func setRating(api: AnixartAPI, releaseId: Int64, stars: Int) async {
@@ -84,6 +140,13 @@ final class ReleaseDetailViewModel: ObservableObject {
             bookmarkError = nil
         } catch {
             bookmarkError = error.localizedDescription
+        }
+    }
+
+    private func deduplicatedCollections(_ collections: [AnixartCollection]) -> [AnixartCollection] {
+        var seen = Set<Int64>()
+        return collections.filter { collection in
+            seen.insert(collection.id).inserted
         }
     }
 }
@@ -363,19 +426,107 @@ struct ReleaseDetailView: View {
     }
 
     private var relatedCollectionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("В коллекциях").font(.title3.bold())
+        let visibleCollections = vm.filteredRelatedCollections
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("В коллекциях")
+                    .font(.title3.bold())
+                Text("\(visibleCollections.count)/\(vm.relatedCollections.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Picker("Сортировка", selection: Binding(
+                    get: { vm.relatedCollectionsSort },
+                    set: { sort in
+                        Task {
+                            await vm.changeRelatedCollectionsSort(
+                                sort,
+                                api: appState.api,
+                                releaseId: releaseId
+                            )
+                        }
+                    }
+                )) {
+                    ForEach(CollectionSort.allCases) { sort in
+                        Text(sort.title).tag(sort)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 220)
+            }
+
+            if vm.relatedCollections.count > 6 || vm.hasRelatedCollectionsSearchQuery {
+                relatedCollectionsSearchField
+            }
+
+            if visibleCollections.isEmpty {
+                Text("По этому запросу коллекции не найдены.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 14) {
-                    ForEach(vm.relatedCollections) { collection in
+                    ForEach(visibleCollections) { collection in
                         NavigationLink(value: CollectionRoute(collection)) {
                             CollectionCard(collection: collection, style: .compact)
                         }
                         .buttonStyle(.plain)
                     }
+
+                    if vm.canLoadMoreRelatedCollections {
+                        Button {
+                            Task {
+                                await vm.loadRelatedCollections(
+                                    api: appState.api,
+                                    releaseId: releaseId
+                                )
+                            }
+                        } label: {
+                            VStack(spacing: 8) {
+                                if vm.isLoadingMoreRelatedCollections {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Image(systemName: "chevron.right.circle")
+                                        .font(.title2)
+                                }
+                                Text("Ещё")
+                                    .font(.caption.weight(.medium))
+                            }
+                            .frame(width: 116, height: 124)
+                            .background(Color.secondary.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(vm.isLoadingMoreRelatedCollections)
+                    }
                 }
             }
         }
+    }
+
+    private var relatedCollectionsSearchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Поиск по коллекциям", text: $vm.relatedCollectionsSearchQuery)
+                .textFieldStyle(.plain)
+            if !vm.relatedCollectionsSearchQuery.isEmpty {
+                Button {
+                    vm.relatedCollectionsSearchQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Очистить поиск")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: 360, alignment: .leading)
     }
 
     private func screenshotsSection(urls: [URL]) -> some View {
