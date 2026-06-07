@@ -8,16 +8,42 @@ final class HomeViewModel: ObservableObject {
     @Published var commentsWeek: [ReleaseComment] = []
     @Published var weekCollections: [AnixartCollection] = []
     @Published var isLoading = false
+    @Published var isLoadingMoreWatching = false
+    @Published var isLoadingMoreRecommendations = false
+    @Published var isLoadingMoreWeekCollections = false
     @Published var errorMessage: String?
+
+    private var watchingPage = 0
+    private var recommendationsPage = 0
+    private var weekCollectionsPage = 0
+    private var watchingReachedEnd = false
+    private var recommendationsReachedEnd = false
+    private var weekCollectionsReachedEnd = false
+
+    var canLoadMoreWatching: Bool {
+        !isLoading && !isLoadingMoreWatching && !watchingReachedEnd
+    }
+
+    var canLoadMoreRecommendations: Bool {
+        !isLoading && !isLoadingMoreRecommendations && !recommendationsReachedEnd
+    }
+
+    var canLoadMoreWeekCollections: Bool {
+        !isLoading && !isLoadingMoreWeekCollections && !weekCollectionsReachedEnd
+    }
 
     func load(api: AnixartAPI) async {
         isLoading = true
+        resetPaging()
         do {
             let watchingResp = try await api.discoverWatching(page: 0)
             self.watching = watchingResp.items
+            watchingPage = 1
+            watchingReachedEnd = reachedEnd(page: 0, totalPageCount: watchingResp.totalPageCount, incomingIsEmpty: watchingResp.items.isEmpty)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+            watchingReachedEnd = true
         }
         if let discussingResp = try? await api.discoverDiscussing() {
             self.discussing = discussingResp.items
@@ -31,18 +57,125 @@ final class HomeViewModel: ObservableObject {
         }
         if let collectionsResp = try? await api.discoverWeekCollections(page: 0) {
             self.weekCollections = collectionsResp.items
+            weekCollectionsPage = 1
+            weekCollectionsReachedEnd = reachedEnd(
+                page: 0,
+                totalPageCount: collectionsResp.totalPageCount,
+                incomingIsEmpty: collectionsResp.items.isEmpty
+            )
         } else {
             self.weekCollections = []
+            weekCollectionsReachedEnd = true
         }
         // Personal recommendations only when authed (don't fail the whole load if this fails).
         if api.auth.isAuthenticated {
-            if let recs = try? await api.discoverRecommendations(page: 0).items {
-                self.recommendations = recs
+            if let response = try? await api.discoverRecommendations(page: 0) {
+                self.recommendations = response.items
+                recommendationsPage = 1
+                recommendationsReachedEnd = reachedEnd(
+                    page: 0,
+                    totalPageCount: response.totalPageCount,
+                    incomingIsEmpty: response.items.isEmpty
+                )
+            } else {
+                recommendations = []
+                recommendationsReachedEnd = true
             }
         } else {
             self.recommendations = []
+            recommendationsReachedEnd = true
         }
         isLoading = false
+    }
+
+    func loadMoreWatching(api: AnixartAPI) async {
+        guard canLoadMoreWatching else { return }
+        isLoadingMoreWatching = true
+        defer { isLoadingMoreWatching = false }
+        do {
+            let page = watchingPage
+            let response = try await api.discoverWatching(page: page)
+            watching = deduplicated(watching + response.items)
+            watchingPage = page + 1
+            watchingReachedEnd = reachedEnd(
+                page: page,
+                totalPageCount: response.totalPageCount,
+                incomingIsEmpty: response.items.isEmpty
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func loadMoreRecommendations(api: AnixartAPI) async {
+        guard api.auth.isAuthenticated, canLoadMoreRecommendations else { return }
+        isLoadingMoreRecommendations = true
+        defer { isLoadingMoreRecommendations = false }
+        do {
+            let page = recommendationsPage
+            let response = try await api.discoverRecommendations(page: page)
+            recommendations = deduplicated(recommendations + response.items)
+            recommendationsPage = page + 1
+            recommendationsReachedEnd = reachedEnd(
+                page: page,
+                totalPageCount: response.totalPageCount,
+                incomingIsEmpty: response.items.isEmpty
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func loadMoreWeekCollections(api: AnixartAPI) async {
+        guard canLoadMoreWeekCollections else { return }
+        isLoadingMoreWeekCollections = true
+        defer { isLoadingMoreWeekCollections = false }
+        do {
+            let page = weekCollectionsPage
+            let response = try await api.discoverWeekCollections(page: page)
+            weekCollections = deduplicatedCollections(weekCollections + response.items)
+            weekCollectionsPage = page + 1
+            weekCollectionsReachedEnd = reachedEnd(
+                page: page,
+                totalPageCount: response.totalPageCount,
+                incomingIsEmpty: response.items.isEmpty
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func resetPaging() {
+        watchingPage = 0
+        recommendationsPage = 0
+        weekCollectionsPage = 0
+        watchingReachedEnd = false
+        recommendationsReachedEnd = false
+        weekCollectionsReachedEnd = false
+        isLoadingMoreWatching = false
+        isLoadingMoreRecommendations = false
+        isLoadingMoreWeekCollections = false
+    }
+
+    private func reachedEnd(page: Int, totalPageCount: Int?, incomingIsEmpty: Bool) -> Bool {
+        if let totalPageCount {
+            return page + 1 >= totalPageCount
+        }
+        return incomingIsEmpty
+    }
+
+    private func deduplicated(_ releases: [Release]) -> [Release] {
+        var seen = Set<Int64>()
+        return releases.filter { release in
+            seen.insert(release.id).inserted
+        }
+    }
+
+    private func deduplicatedCollections(_ collections: [AnixartCollection]) -> [AnixartCollection] {
+        var seen = Set<Int64>()
+        return collections.filter { collection in
+            seen.insert(collection.id).inserted
+        }
     }
 }
 
@@ -64,12 +197,26 @@ struct HomeView: View {
                     }
                 } else {
                     if !vm.recommendations.isEmpty {
-                        section(title: "Рекомендации", releases: vm.recommendations)
+                        section(
+                            title: "Рекомендации",
+                            releases: vm.recommendations,
+                            canLoadMore: vm.canLoadMoreRecommendations,
+                            isLoadingMore: vm.isLoadingMoreRecommendations
+                        ) {
+                            Task { await vm.loadMoreRecommendations(api: appState.api) }
+                        }
                     }
                     if !vm.discussing.isEmpty {
                         section(title: "Обсуждают", releases: vm.discussing)
                     }
-                    section(title: "Сейчас смотрят", releases: vm.watching)
+                    section(
+                        title: "Сейчас смотрят",
+                        releases: vm.watching,
+                        canLoadMore: vm.canLoadMoreWatching,
+                        isLoadingMore: vm.isLoadingMoreWatching
+                    ) {
+                        Task { await vm.loadMoreWatching(api: appState.api) }
+                    }
                     if !vm.weekCollections.isEmpty {
                         collectionsSection
                     }
@@ -107,7 +254,13 @@ struct HomeView: View {
         }
     }
 
-    private func section(title: String, releases: [Release]) -> some View {
+    private func section(
+        title: String,
+        releases: [Release],
+        canLoadMore: Bool = false,
+        isLoadingMore: Bool = false,
+        onLoadMore: (() -> Void)? = nil
+    ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
                 .font(.title3.bold())
@@ -118,6 +271,15 @@ struct HomeView: View {
                             ReleaseCard(release: release)
                         }
                         .buttonStyle(.plain)
+                    }
+                    if canLoadMore || isLoadingMore {
+                        Button {
+                            onLoadMore?()
+                        } label: {
+                            HomeLoadMoreCard(title: "Показать ещё", isLoading: isLoadingMore, width: 160, height: 230)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isLoadingMore)
                     }
                 }
             }
@@ -155,9 +317,49 @@ struct HomeView: View {
                         }
                         .buttonStyle(.plain)
                     }
+
+                    if vm.canLoadMoreWeekCollections || vm.isLoadingMoreWeekCollections {
+                        Button {
+                            Task { await vm.loadMoreWeekCollections(api: appState.api) }
+                        } label: {
+                            HomeLoadMoreCard(
+                                title: "Показать ещё",
+                                isLoading: vm.isLoadingMoreWeekCollections,
+                                width: 220,
+                                height: 124
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(vm.isLoadingMoreWeekCollections)
+                    }
                 }
             }
         }
+    }
+}
+
+private struct HomeLoadMoreCard: View {
+    let title: String
+    let isLoading: Bool
+    let width: CGFloat
+    let height: CGFloat
+
+    var body: some View {
+        VStack(spacing: 10) {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "chevron.right.circle.fill")
+                    .font(.title2)
+            }
+            Text(title)
+                .font(.caption.weight(.medium))
+        }
+        .foregroundStyle(.secondary)
+        .frame(width: width, height: height)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
