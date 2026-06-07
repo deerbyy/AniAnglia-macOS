@@ -720,16 +720,11 @@ private struct CommentRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            RemoteImage(url: comment.profile?.avatarURL, contentMode: .fill) {
-                Circle().fill(Color.secondary.opacity(0.2))
-            }
-            .frame(width: 36, height: 36)
-            .clipShape(Circle())
+            CommentAuthorAvatarLink(profile: comment.profile, size: 36)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text(comment.profile?.displayName ?? "—")
-                        .font(.callout.bold())
+                    CommentAuthorNameLink(profile: comment.profile, font: .callout.bold())
                     Text(comment.formattedDate)
                         .font(.caption)
                         .foregroundStyle(.secondary)

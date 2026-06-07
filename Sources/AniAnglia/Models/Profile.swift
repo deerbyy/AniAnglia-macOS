@@ -70,6 +70,27 @@ struct Profile: Codable, Identifiable, Hashable {
         }
     }
 
+    func matchesProfileQuery(_ query: String) -> Bool {
+        let needle = query.normalizedLibrarySearchQuery
+        guard !needle.isEmpty else { return true }
+
+        let values = [
+            displayName,
+            login,
+            status,
+            telegramPage,
+            vkPage,
+            instagramPage,
+            discordPage,
+            tiktokPage,
+            String(id)
+        ]
+
+        return (values + roles.map(\.name))
+            .compactMap { $0?.normalizedLibrarySearchQuery }
+            .contains { $0.contains(needle) }
+    }
+
     init(
         id: Int64,
         login: String?,

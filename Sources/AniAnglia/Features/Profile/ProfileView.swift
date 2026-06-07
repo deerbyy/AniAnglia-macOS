@@ -17,14 +17,32 @@ final class ProfileViewModel: ObservableObject {
     @Published var friendsHasMore = true
     @Published var friendsLoading = false
     @Published var friendsError: String?
+    @Published var friendsSearchQuery = ""
     @Published var friendRequestScope: FriendRequestScope = .incoming
     @Published var friendRequests: [Profile] = []
     @Published var friendRequestsPage = 0
     @Published var friendRequestsHasMore = true
     @Published var friendRequestsLoading = false
     @Published var friendRequestsError: String?
+    @Published var friendRequestsSearchQuery = ""
     @Published var friendActionIds: Set<Int64> = []
     @Published var friendActionMessage: String?
+
+    var filteredFriends: [Profile] {
+        friends.filter { $0.matchesProfileQuery(friendsSearchQuery) }
+    }
+
+    var filteredFriendRequests: [Profile] {
+        friendRequests.filter { $0.matchesProfileQuery(friendRequestsSearchQuery) }
+    }
+
+    var hasFriendsSearchQuery: Bool {
+        !friendsSearchQuery.normalizedLibrarySearchQuery.isEmpty
+    }
+
+    var hasFriendRequestsSearchQuery: Bool {
+        !friendRequestsSearchQuery.normalizedLibrarySearchQuery.isEmpty
+    }
 
     func setPrefetchedProfile(_ profile: Profile?) {
         guard self.profile == nil else { return }
@@ -633,6 +651,14 @@ struct ProfileView: View {
                 .help("Обновить заявки")
             }
 
+            if !vm.friendRequests.isEmpty || vm.hasFriendRequestsSearchQuery {
+                profileSearchField(
+                    placeholder: "Поиск по заявкам",
+                    text: $vm.friendRequestsSearchQuery,
+                    clearHelp: "Очистить поиск по заявкам"
+                )
+            }
+
             if let error = vm.friendRequestsError, vm.friendRequests.isEmpty {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .font(.caption)
@@ -646,9 +672,17 @@ struct ProfileView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
+                let visibleRequests = vm.filteredFriendRequests
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .top, spacing: 12) {
-                        ForEach(vm.friendRequests) { profile in
+                        if visibleRequests.isEmpty {
+                            Text("По этому запросу ничего не найдено.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 210, height: 146, alignment: .center)
+                        }
+
+                        ForEach(visibleRequests) { profile in
                             FriendRequestCard(
                                 profile: profile,
                                 scope: vm.friendRequestScope,
@@ -717,6 +751,14 @@ struct ProfileView: View {
                     .disabled(vm.friendsLoading)
                 }
 
+                if !vm.friends.isEmpty || vm.hasFriendsSearchQuery {
+                    profileSearchField(
+                        placeholder: "Поиск по друзьям",
+                        text: $vm.friendsSearchQuery,
+                        clearHelp: "Очистить поиск по друзьям"
+                    )
+                }
+
                 if let error = vm.friendsError, vm.friends.isEmpty {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(.caption)
@@ -730,9 +772,17 @@ struct ProfileView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
+                    let visibleFriends = vm.filteredFriends
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(alignment: .top, spacing: 12) {
-                            ForEach(vm.friends) { friend in
+                            if visibleFriends.isEmpty {
+                                Text("По этому запросу ничего не найдено.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 132, height: 132, alignment: .center)
+                            }
+
+                            ForEach(visibleFriends) { friend in
                                 NavigationLink(value: ProfileRoute(friend)) {
                                     ProfileFriendCard(profile: friend)
                                 }
@@ -820,6 +870,34 @@ struct ProfileView: View {
                 }
             }
         }
+    }
+
+    private func profileSearchField(
+        placeholder: String,
+        text: Binding<String>,
+        clearHelp: String
+    ) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.plain)
+            if !text.wrappedValue.isEmpty {
+                Button {
+                    text.wrappedValue = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(clearHelp)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: 360, alignment: .leading)
     }
 
     @ViewBuilder

@@ -130,14 +130,7 @@ struct HomeView: View {
                 .font(.title3.bold())
             LazyVStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(vm.commentsWeek.prefix(6))) { comment in
-                    if let release = comment.release {
-                        NavigationLink(value: release) {
-                            WeeklyCommentRow(comment: comment)
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        WeeklyCommentRow(comment: comment)
-                    }
+                    WeeklyCommentRow(comment: comment)
                 }
             }
         }
@@ -173,16 +166,11 @@ private struct WeeklyCommentRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            RemoteImage(url: comment.profile?.avatarURL, contentMode: .fill) {
-                Circle().fill(Color.secondary.opacity(0.2))
-            }
-            .frame(width: 34, height: 34)
-            .clipShape(Circle())
+            CommentAuthorAvatarLink(profile: comment.profile, size: 34)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text(comment.profile?.displayName ?? "—")
-                        .font(.callout.bold())
+                    CommentAuthorNameLink(profile: comment.profile, font: .callout.bold())
                     if !comment.formattedDate.isEmpty {
                         Text(comment.formattedDate)
                             .font(.caption)
@@ -195,12 +183,7 @@ private struct WeeklyCommentRow: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                if let originTitle = comment.originTitle {
-                    Text(originTitle)
-                        .font(.caption)
-                        .foregroundStyle(.tint)
-                        .lineLimit(1)
-                }
+                originLink
                 Text(comment.isSpoiler == true ? "Спойлер" : comment.message)
                     .font(.callout)
                     .foregroundStyle(comment.isSpoiler == true ? .secondary : .primary)
@@ -211,6 +194,29 @@ private struct WeeklyCommentRow: View {
         .padding(10)
         .background(Color.secondary.opacity(0.07))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private var originLink: some View {
+        if let release = comment.release {
+            NavigationLink(value: release) {
+                Text(comment.originTitle ?? release.displayTitle)
+                    .font(.caption)
+                    .foregroundStyle(.tint)
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+            .help("Открыть релиз")
+        } else if let collection = comment.collection {
+            NavigationLink(value: CollectionRoute(collection)) {
+                Text(comment.originTitle ?? collection.displayTitle)
+                    .font(.caption)
+                    .foregroundStyle(.tint)
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+            .help("Открыть коллекцию")
+        }
     }
 }
 
