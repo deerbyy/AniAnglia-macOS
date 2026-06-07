@@ -8,6 +8,22 @@ private enum ProfilePreviewSection: Hashable {
     case videos
 }
 
+private struct ProfileActivityContent {
+    let votes: [Release]
+    let history: [Release]
+    let collections: [AnixartCollection]
+    let comments: [ReleaseComment]
+    let videos: [Video]
+
+    var totalCount: Int {
+        votes.count + history.count + collections.count + comments.count + videos.count
+    }
+
+    var isEmpty: Bool {
+        totalCount == 0
+    }
+}
+
 @MainActor
 final class ProfileViewModel: ObservableObject {
     @Published var profile: Profile?
@@ -258,6 +274,7 @@ struct ProfileView: View {
     @StateObject private var vm = ProfileViewModel()
     @State private var playingProfileVideo: Video?
     @State private var expandedPreviewSections: Set<ProfilePreviewSection> = []
+    @State private var activitySearchQuery = ""
 
     init(profileId: Int64? = nil, prefetched: Profile? = nil) {
         self.profileId = profileId
@@ -275,6 +292,7 @@ struct ProfileView: View {
         .navigationTitle(navigationTitle)
         .task(id: taskID) {
             expandedPreviewSections = []
+            activitySearchQuery = ""
             vm.setPrefetchedProfile(prefetched)
             guard let id = effectiveProfileId else { return }
             await vm.loadProfile(id: id, api: appState.api)
@@ -661,18 +679,76 @@ struct ProfileView: View {
 
     @ViewBuilder
     private func profileActivitySections(for profile: Profile) -> some View {
+        let activity = filteredActivityContent(for: profile)
+        let unfilteredActivityCount = activityContent(for: profile).totalCount
+        let hasActivitySearchQuery = !activitySearchQuery.normalizedLibrarySearchQuery.isEmpty
         VStack(alignment: .leading, spacing: 18) {
             watchDynamicsSection(for: profile)
             if isViewingCurrentProfile && appState.auth.isAuthenticated {
                 friendRequestsSection
             }
             friendsSection(for: profile)
-            releasePreviewSection(section: .votes, title: "Оценки релизов", icon: "star.leadinghalf.filled", releases: profile.votes)
-            releasePreviewSection(section: .history, title: "Просмотрено недавно", icon: "clock.arrow.circlepath", releases: profile.history)
-            collectionsPreviewSection(for: profile)
-            commentsPreviewSection(for: profile)
-            videosPreviewSection(for: profile)
+            if unfilteredActivityCount > 0 {
+                activitySearchControls(
+                    visibleCount: activity.totalCount,
+                    totalCount: unfilteredActivityCount
+                )
+            }
+            if hasActivitySearchQuery && activity.isEmpty {
+                unavailableProfileView(
+                    title: "По активности ничего не найдено",
+                    systemImage: "magnifyingglass",
+                    description: "Попробуй другой запрос: название, комментарий, коллекцию, хостинг видео или год."
+                )
+                .frame(minHeight: 180)
+            }
+            releasePreviewSection(section: .votes, title: "Оценки релизов", icon: "star.leadinghalf.filled", releases: activity.votes)
+            releasePreviewSection(section: .history, title: "Просмотрено недавно", icon: "clock.arrow.circlepath", releases: activity.history)
+            collectionsPreviewSection(collections: activity.collections)
+            commentsPreviewSection(comments: activity.comments)
+            videosPreviewSection(videos: activity.videos)
         }
+    }
+
+    private func activitySearchControls(visibleCount: Int, totalCount: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                profileSearchField(
+                    placeholder: "Поиск по активности профиля",
+                    text: $activitySearchQuery,
+                    clearHelp: "Очистить поиск по активности"
+                )
+                Text("\(visibleCount)/\(totalCount)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Text("Фильтрует оценки, историю, коллекции, комментарии и видео среди уже загруженных данных.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func activityContent(for profile: Profile) -> ProfileActivityContent {
+        ProfileActivityContent(
+            votes: profile.votes,
+            history: profile.history,
+            collections: profile.collectionsPreview,
+            comments: (profile.releaseCommentsPreview + profile.commentsPreview).uniquedById(),
+            videos: profile.releaseVideosPreview
+        )
+    }
+
+    private func filteredActivityContent(for profile: Profile) -> ProfileActivityContent {
+        let content = activityContent(for: profile)
+        let query = activitySearchQuery
+        guard !query.normalizedLibrarySearchQuery.isEmpty else { return content }
+        return ProfileActivityContent(
+            votes: content.votes.filter { $0.matchesLibraryQuery(query) },
+            history: content.history.filter { $0.matchesLibraryQuery(query) },
+            collections: content.collections.filter { $0.matchesLibraryQuery(query) },
+            comments: content.comments.filter { $0.matchesProfileActivityQuery(query) },
+            videos: content.videos.filter { $0.matchesVideoQuery(query) }
+        )
     }
 
     @ViewBuilder
@@ -969,18 +1045,18 @@ struct ProfileView: View {
     }
 
     @ViewBuilder
-    private func collectionsPreviewSection(for profile: Profile) -> some View {
-        if !profile.collectionsPreview.isEmpty {
+    private func collectionsPreviewSection(collections: [AnixartCollection]) -> some View {
+        if !collections.isEmpty {
             let limit = 10
             let isExpanded = isPreviewSectionExpanded(.collections)
-            let visibleCollections = isExpanded ? profile.collectionsPreview : Array(profile.collectionsPreview.prefix(limit))
+            let visibleCollections = isExpanded ? collections : Array(collections.prefix(limit))
             VStack(alignment: .leading, spacing: 10) {
                 previewSectionHeader(
                     section: .collections,
                     title: "Коллекции профиля",
                     icon: "rectangle.stack",
                     visibleCount: visibleCollections.count,
-                    totalCount: profile.collectionsPreview.count,
+                    totalCount: collections.count,
                     limit: limit
                 )
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -999,19 +1075,18 @@ struct ProfileView: View {
     }
 
     @ViewBuilder
-    private func commentsPreviewSection(for profile: Profile) -> some View {
-        let allComments = (profile.releaseCommentsPreview + profile.commentsPreview).uniquedById()
-        if !allComments.isEmpty {
+    private func commentsPreviewSection(comments: [ReleaseComment]) -> some View {
+        if !comments.isEmpty {
             let limit = 6
             let isExpanded = isPreviewSectionExpanded(.comments)
-            let visibleComments = isExpanded ? allComments : Array(allComments.prefix(limit))
+            let visibleComments = isExpanded ? comments : Array(comments.prefix(limit))
             VStack(alignment: .leading, spacing: 10) {
                 previewSectionHeader(
                     section: .comments,
                     title: "Комментарии профиля",
                     icon: "text.bubble",
                     visibleCount: visibleComments.count,
-                    totalCount: allComments.count,
+                    totalCount: comments.count,
                     limit: limit
                 )
                 LazyVStack(alignment: .leading, spacing: 10) {
@@ -1036,18 +1111,18 @@ struct ProfileView: View {
     }
 
     @ViewBuilder
-    private func videosPreviewSection(for profile: Profile) -> some View {
-        if !profile.releaseVideosPreview.isEmpty {
+    private func videosPreviewSection(videos: [Video]) -> some View {
+        if !videos.isEmpty {
             let limit = 10
             let isExpanded = isPreviewSectionExpanded(.videos)
-            let visibleVideos = isExpanded ? profile.releaseVideosPreview : Array(profile.releaseVideosPreview.prefix(limit))
+            let visibleVideos = isExpanded ? videos : Array(videos.prefix(limit))
             VStack(alignment: .leading, spacing: 10) {
                 previewSectionHeader(
                     section: .videos,
                     title: "Видео профиля",
                     icon: "film",
                     visibleCount: visibleVideos.count,
-                    totalCount: profile.releaseVideosPreview.count,
+                    totalCount: videos.count,
                     limit: limit
                 )
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -1402,6 +1477,26 @@ private extension Array where Element == ReleaseComment {
     func uniquedById() -> [ReleaseComment] {
         var seen = Set<Int64>()
         return filter { seen.insert($0.id).inserted }
+    }
+}
+
+private extension ReleaseComment {
+    func matchesProfileActivityQuery(_ query: String) -> Bool {
+        let needle = query.normalizedLibrarySearchQuery
+        guard !needle.isEmpty else { return true }
+        let values = [
+            message,
+            formattedDate,
+            originTitle,
+            profile?.displayName,
+            release?.displayTitle,
+            collection?.displayTitle,
+            postedAtEpisode.map { "\($0)" }
+        ]
+        let textMatches = values
+            .compactMap { $0?.normalizedLibrarySearchQuery }
+            .contains { $0.contains(needle) }
+        return textMatches || release?.matchesLibraryQuery(query) == true
     }
 }
 
