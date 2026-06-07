@@ -5,6 +5,8 @@ final class ReleaseDetailViewModel: ObservableObject {
     @Published var release: Release?
     @Published var videoBlocks: [VideoBlock] = []
     @Published var relatedCollections: [AnixartCollection] = []
+    @Published var relatedReleases: [Release] = []
+    @Published var relatedReleasesLoading = false
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var bookmarkCategory: Int? = nil // 0 = none, 1..5 = list category
@@ -79,6 +81,7 @@ final class ReleaseDetailViewModel: ObservableObject {
             bookmarkCategory = loadedRelease.profileListStatus
             isFavorite = loadedRelease.isFavorite ?? false
             userVote = loadedRelease.yourVote ?? 0
+            await loadRelatedReleases(api: api, release: loadedRelease)
         }
         videoBlocks = loadedBlocks
         await loadRelatedCollections(api: api, releaseId: releaseId, reset: true)
@@ -127,6 +130,24 @@ final class ReleaseDetailViewModel: ObservableObject {
         guard sort != relatedCollectionsSort else { return }
         relatedCollectionsSort = sort
         await loadRelatedCollections(api: api, releaseId: releaseId, reset: true)
+    }
+
+    func loadRelatedReleases(api: AnixartAPI, release: Release) async {
+        let seed = relatedReleaseSearchSeed(for: release)
+        guard !seed.isEmpty else {
+            relatedReleases = []
+            return
+        }
+        relatedReleasesLoading = true
+        defer { relatedReleasesLoading = false }
+        do {
+            let response = try await api.searchReleases(query: seed, page: 0, searchBy: ReleaseSearchScope.title.rawValue)
+            relatedReleases = response.items
+                .filter { $0.id != release.id && isPotentiallyRelated($0, to: release) }
+                .sorted(by: chronologicalReleaseSort)
+        } catch {
+            relatedReleases = []
+        }
     }
 
     func setRating(api: AnixartAPI, releaseId: Int64, stars: Int) async {
@@ -179,6 +200,73 @@ final class ReleaseDetailViewModel: ObservableObject {
             seen.insert(collection.id).inserted
         }
     }
+
+    private func relatedReleaseSearchSeed(for release: Release) -> String {
+        let source = release.titleOriginal ?? release.titleRu ?? release.titleAlt ?? release.displayTitle
+        let parts = source
+            .replacingOccurrences(of: "—", with: ":")
+            .replacingOccurrences(of: "-", with: ":")
+            .split(separator: ":")
+        let seed = String(parts.first ?? Substring(source))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return seed.isEmpty ? release.displayTitle : seed
+    }
+
+    private func isPotentiallyRelated(_ candidate: Release, to release: Release) -> Bool {
+        let baseTokens = significantTitleTokens(for: release)
+        let candidateTokens = significantTitleTokens(for: candidate)
+        guard !baseTokens.isEmpty, !candidateTokens.isEmpty else { return false }
+        let overlap = baseTokens.intersection(candidateTokens)
+        if overlap.count >= min(2, baseTokens.count) { return true }
+        let baseTitle = normalizedTitle(release.displayTitle)
+        let candidateTitle = normalizedTitle(candidate.displayTitle)
+        return baseTitle.count > 5 && (candidateTitle.contains(baseTitle) || baseTitle.contains(candidateTitle))
+    }
+
+    private func significantTitleTokens(for release: Release) -> Set<String> {
+        let titles = [release.titleOriginal, release.titleRu, release.titleAlt, release.displayTitle]
+        let stopwords: Set<String> = [
+            "season", "сезон", "part", "часть", "movie", "film", "фильм", "ova", "ona",
+            "special", "спешл", "tv", "the", "and", "no", "of", "s"
+        ]
+        var tokens: [String] = []
+        for title in titles.compactMap({ $0 }) {
+            for rawToken in normalizedTitle(title).split(separator: " ") {
+                let token = String(rawToken)
+                if token.count > 1, !stopwords.contains(token), Int(token) == nil {
+                    tokens.append(token)
+                }
+            }
+        }
+        return Set(tokens)
+    }
+
+    private func normalizedTitle(_ title: String) -> String {
+        title
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "ru_RU"))
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
+
+    private func chronologicalReleaseSort(_ lhs: Release, _ rhs: Release) -> Bool {
+        let lhsYear = Int(lhs.year ?? "") ?? Int.max
+        let rhsYear = Int(rhs.year ?? "") ?? Int.max
+        if lhsYear != rhsYear { return lhsYear < rhsYear }
+        let lhsRank = releaseCategoryRank(lhs.category?.name)
+        let rhsRank = releaseCategoryRank(rhs.category?.name)
+        if lhsRank != rhsRank { return lhsRank < rhsRank }
+        return lhs.displayTitle.localizedStandardCompare(rhs.displayTitle) == .orderedAscending
+    }
+
+    private func releaseCategoryRank(_ category: String?) -> Int {
+        let value = category?.normalizedLibrarySearchQuery ?? ""
+        if value.contains("сериал") || value.contains("tv") { return 0 }
+        if value.contains("фильм") || value.contains("movie") { return 1 }
+        if value.contains("ova") || value.contains("она") || value.contains("ona") { return 2 }
+        if value.contains("спеш") || value.contains("special") { return 3 }
+        return 4
+    }
 }
 
 struct ReleaseDetailView: View {
@@ -196,17 +284,19 @@ struct ReleaseDetailView: View {
             VStack(alignment: .leading, spacing: 24) {
                 header
                 if let release = effectiveRelease {
-                    info(for: release)
+                    overview(for: release)
+                    if !release.screenshots.isEmpty {
+                        screenshotsSection(urls: release.screenshots)
+                    }
+                    if !vm.relatedReleases.isEmpty || vm.relatedReleasesLoading {
+                        relatedReleasesSection
+                    }
                     if !vm.videoBlocks.isEmpty {
                         videosSection
                     }
                     if !vm.relatedCollections.isEmpty {
                         relatedCollectionsSection
                     }
-                    if !release.screenshots.isEmpty {
-                        screenshotsSection(urls: release.screenshots)
-                    }
-                    description(for: release)
                     Divider().padding(.vertical, 8)
                     CommentsView(releaseId: releaseId)
                 } else if vm.isLoading {
@@ -258,24 +348,21 @@ struct ReleaseDetailView: View {
                 if let release = effectiveRelease {
                     Text(release.displayTitle)
                         .font(.system(size: 28, weight: .bold))
+                        .lineLimit(3)
                     if let original = release.titleOriginal, original != release.displayTitle {
                         Text(original)
                             .font(.title3)
                             .foregroundStyle(.secondary)
+                            .lineLimit(2)
                     }
-                    HStack(spacing: 12) {
-                        if let year = release.year { Tag(text: year) }
-                        if let status = release.status?.name { Tag(text: status) }
-                        if let category = release.category?.name { Tag(text: category) }
-                        if let grade = release.grade {
-                            Tag(text: String(format: "★ %.2f", grade), tint: .yellow)
-                        }
+                    FlowLayout(spacing: 8, rowSpacing: 8) {
+                        if let year = release.year { Tag(text: year, systemImage: "calendar") }
+                        if let status = release.status?.name { Tag(text: status, systemImage: "dot.radiowaves.left.and.right") }
+                        if let category = release.category?.name { Tag(text: category, systemImage: "rectangle.on.rectangle") }
+                        if let grade = release.grade { Tag(text: String(format: "%.2f", grade), systemImage: "star.fill", tint: .yellow) }
+                        if let voteCount = release.voteCount { Tag(text: "\(voteCount) оценок", systemImage: "person.2") }
                     }
-                    if let genres = release.genres, !genres.isEmpty {
-                        Text(genres)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
+                    releaseSummaryGrid(for: release)
                     if appState.auth.isAuthenticated {
                         userRatingRow
                     }
@@ -398,45 +485,116 @@ struct ReleaseDetailView: View {
         .help(appState.auth.isAuthenticated ? "Списки отслеживания" : "Войди в аккаунт во вкладке «Профиль», чтобы добавлять в закладки")
     }
 
-    private func info(for release: Release) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            row("Студия", release.studio)
-            row("Страна", release.country)
-            row("Автор", release.author)
-            row("Режиссёр", release.director)
-            row("Серий вышло", release.episodesReleased.map { String($0) })
-            row("Серий всего", release.episodesTotal.map { String($0) })
+    private func releaseSummaryGrid(for release: Release) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 10)], alignment: .leading, spacing: 10) {
+            releaseMetric("Оценка", release.grade.map { String(format: "%.2f", $0) }, "star.fill", .yellow)
+            releaseMetric("Серии", episodeProgressText(for: release), "play.rectangle", .accentColor)
+            releaseMetric("Тип", release.category?.name, "rectangle.on.rectangle", .secondary)
+            releaseMetric("Статус", release.status?.name, "dot.radiowaves.left.and.right", .secondary)
         }
-        .font(.callout)
+        .frame(maxWidth: 620, alignment: .leading)
+    }
+
+    private func releaseMetric(_ title: String, _ value: String?, _ icon: String, _ tint: Color) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon)
+                .foregroundStyle(tint)
+                .frame(width: 17)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value?.nilIfBlank ?? "—")
+                    .font(.headline.monospacedDigit())
+                    .lineLimit(1)
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func overview(for release: Release) -> some View {
+        VStack(alignment: .leading, spacing: 22) {
+            releaseDescriptionSection(for: release)
+            releaseInfoSection(for: release)
+            genresSection(for: release)
+        }
+    }
+
+    private func releaseDescriptionSection(for release: Release) -> some View {
+        releaseSection(title: "Описание", icon: "text.alignleft") {
+            Text(release.description?.nilIfBlank ?? "Описание отсутствует.")
+                .font(.callout)
+                .lineSpacing(4)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     @ViewBuilder
-    private func row(_ label: String, _ value: String?) -> some View {
-        if let value, !value.isEmpty {
-            HStack(alignment: .top, spacing: 12) {
-                Text(label)
-                    .frame(width: 120, alignment: .leading)
-                    .foregroundStyle(.secondary)
-                Text(value)
+    private func releaseInfoSection(for release: Release) -> some View {
+        let items = releaseInfoItems(for: release)
+        if !items.isEmpty {
+            releaseSection(title: "Информация", icon: "info.circle") {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 12)], alignment: .leading, spacing: 12) {
+                    ForEach(items) { item in
+                        ReleaseInfoTile(item: item)
+                    }
+                }
             }
         }
     }
 
-    private func description(for release: Release) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Описание").font(.title3.bold())
-            Text(release.description ?? "—")
-                .font(.callout)
-                .textSelection(.enabled)
+    @ViewBuilder
+    private func genresSection(for release: Release) -> some View {
+        let genres = release.genreList
+        if !genres.isEmpty {
+            releaseSection(title: "Жанры", icon: "tag") {
+                FlowLayout(spacing: 8, rowSpacing: 8) {
+                    ForEach(genres, id: \.self) { genre in
+                        Tag(text: genre)
+                    }
+                }
+            }
+        }
+    }
+
+    private func releaseInfoItems(for release: Release) -> [ReleaseInfoItem] {
+        [
+            ReleaseInfoItem(title: "Оригинальное", value: release.titleOriginal, icon: "character.book.closed"),
+            ReleaseInfoItem(title: "Альтернативное", value: release.titleAlt, icon: "textformat.abc"),
+            ReleaseInfoItem(title: "Год выхода", value: release.year, icon: "calendar"),
+            ReleaseInfoItem(title: "Формат", value: release.category?.name, icon: "rectangle.on.rectangle"),
+            ReleaseInfoItem(title: "Статус", value: release.status?.name, icon: "dot.radiowaves.left.and.right"),
+            ReleaseInfoItem(title: "Серии", value: episodeProgressText(for: release), icon: "play.rectangle"),
+            ReleaseInfoItem(title: "Студия", value: release.studio, icon: "building.2"),
+            ReleaseInfoItem(title: "Страна", value: release.country, icon: "globe.europe.africa"),
+            ReleaseInfoItem(title: "Автор", value: release.author, icon: "pencil"),
+            ReleaseInfoItem(title: "Режиссёр", value: release.director, icon: "megaphone"),
+            ReleaseInfoItem(title: "Оценка", value: release.grade.map { String(format: "%.2f", $0) }, icon: "star"),
+            ReleaseInfoItem(title: "Голосов", value: release.voteCount.map(String.init), icon: "person.2")
+        ].compactMap { $0 }
+    }
+
+    private func episodeProgressText(for release: Release) -> String? {
+        switch (release.episodesReleased, release.episodesTotal) {
+        case (.some(let released), .some(let total)) where total > 0:
+            return "\(released)/\(total)"
+        case (.some(let released), _):
+            return "\(released)"
+        case (_, .some(let total)):
+            return "\(total)"
+        default:
+            return nil
         }
     }
 
     private var videosSection: some View {
         let visibleBlocks = vm.filteredVideoBlocks
-        return VStack(alignment: .leading, spacing: 16) {
+        return releaseSection(title: "Видео", icon: "film") {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("Видео")
-                    .font(.title3.bold())
                 Text("\(vm.filteredVideoCount)/\(vm.totalVideoCount)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -467,6 +625,28 @@ struct ReleaseDetailView: View {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    private var relatedReleasesSection: some View {
+        releaseSection(title: "Связанные релизы", icon: "link") {
+            if vm.relatedReleasesLoading && vm.relatedReleases.isEmpty {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 14) {
+                        ForEach(vm.relatedReleases) { release in
+                            NavigationLink(value: release) {
+                                RelatedReleaseCard(release: release)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.bottom, 4)
                 }
             }
         }
@@ -517,10 +697,8 @@ struct ReleaseDetailView: View {
 
     private var relatedCollectionsSection: some View {
         let visibleCollections = vm.filteredRelatedCollections
-        return VStack(alignment: .leading, spacing: 12) {
+        return releaseSection(title: "В коллекциях", icon: "rectangle.stack") {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("В коллекциях")
-                    .font(.title3.bold())
                 Text("\(visibleCollections.count)/\(vm.relatedCollections.count)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
@@ -620,8 +798,10 @@ struct ReleaseDetailView: View {
     }
 
     private func screenshotsSection(urls: [URL]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Кадры").font(.title3.bold())
+        releaseSection(title: "Кадры", icon: "photo.on.rectangle") {
+            Text("\(urls.count)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(Array(urls.enumerated()), id: \.offset) { (index, url) in
@@ -641,20 +821,103 @@ struct ReleaseDetailView: View {
             }
         }
     }
+
+    private func releaseSection<Content: View>(
+        title: String,
+        icon: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: icon)
+                .font(.title3.bold())
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }
 
 private struct Tag: View {
     let text: String
+    var systemImage: String?
     var tint: Color = .accentColor
 
     var body: some View {
-        Text(text)
+        HStack(spacing: 5) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.caption2.weight(.bold))
+            }
+            Text(text)
+                .lineLimit(1)
+        }
             .font(.caption.bold())
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(tint.opacity(0.18))
             .foregroundStyle(tint)
             .clipShape(Capsule())
+    }
+}
+
+private struct ReleaseInfoItem: Identifiable {
+    let title: String
+    let value: String
+    let icon: String
+
+    var id: String { "\(title)-\(value)" }
+
+    init?(title: String, value: String?, icon: String) {
+        guard let value = value?.nilIfBlank else { return nil }
+        self.title = title
+        self.value = value
+        self.icon = icon
+    }
+}
+
+private struct ReleaseInfoTile: View {
+    let item: ReleaseInfoItem
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: item.icon)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(item.value)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct RelatedReleaseCard: View {
+    let release: Release
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ReleaseCard(release: release)
+            FlowLayout(spacing: 6, rowSpacing: 6) {
+                if let year = release.year {
+                    Tag(text: year, systemImage: "calendar")
+                }
+                if let category = release.category?.name {
+                    Tag(text: category, systemImage: "rectangle.on.rectangle")
+                }
+                if let status = release.status?.name {
+                    Tag(text: status, systemImage: "dot.radiowaves.left.and.right")
+                }
+            }
+            .frame(width: 160, alignment: .leading)
+        }
+        .frame(width: 160, alignment: .leading)
     }
 }
 
@@ -686,6 +949,69 @@ private struct VideoThumbnail: View {
     }
 }
 
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+    var rowSpacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        let rows = arrangedRows(subviews: subviews, maxWidth: maxWidth)
+        let width = rows.map(\.width).max() ?? 0
+        let height = rows.reduce(CGFloat.zero) { total, row in
+            total + row.height
+        } + CGFloat(max(0, rows.count - 1)) * rowSpacing
+        return CGSize(width: maxWidth.isFinite ? min(width, maxWidth) : width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = arrangedRows(subviews: subviews, maxWidth: bounds.width)
+        var y = bounds.minY
+        for row in rows {
+            var x = bounds.minX
+            for item in row.items {
+                let size = item.size
+                subviews[item.index].place(
+                    at: CGPoint(x: x, y: y + (row.height - size.height) / 2),
+                    proposal: ProposedViewSize(size)
+                )
+                x += size.width + spacing
+            }
+            y += row.height + rowSpacing
+        }
+    }
+
+    private func arrangedRows(subviews: Subviews, maxWidth: CGFloat) -> [FlowRow] {
+        var rows: [FlowRow] = []
+        var current = FlowRow()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let proposedWidth = current.items.isEmpty ? size.width : current.width + spacing + size.width
+            if proposedWidth > maxWidth, !current.items.isEmpty {
+                rows.append(current)
+                current = FlowRow()
+            }
+            current.items.append(FlowItem(index: index, size: size))
+            current.width = current.items.count == 1 ? size.width : current.width + spacing + size.width
+            current.height = max(current.height, size.height)
+        }
+        if !current.items.isEmpty {
+            rows.append(current)
+        }
+        return rows
+    }
+
+    private struct FlowItem {
+        let index: Int
+        let size: CGSize
+    }
+
+    private struct FlowRow {
+        var items: [FlowItem] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+}
+
 private extension BookmarkCategory {
     var color: Color {
         switch self {
@@ -695,5 +1021,22 @@ private extension BookmarkCategory {
         case .onHold: return .purple
         case .dropped: return .red
         }
+    }
+}
+
+private extension Release {
+    var genreList: [String] {
+        guard let genres else { return [] }
+        return genres
+            .split { [",", ";", "/", "|"].contains(String($0)) }
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
