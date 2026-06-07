@@ -1,5 +1,21 @@
 import SwiftUI
 
+enum EpisodeListFilter: String, CaseIterable, Identifiable {
+    case all
+    case unwatched
+    case watched
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "Все"
+        case .unwatched: return "Не просмотрено"
+        case .watched: return "Просмотрено"
+        }
+    }
+}
+
 @MainActor
 final class EpisodesViewModel: ObservableObject {
     let releaseId: Int64
@@ -14,8 +30,37 @@ final class EpisodesViewModel: ObservableObject {
     @Published var errorMessage: String?
     /// Locally toggled watched state, keyed by Episode.id.
     @Published var watchedOverrides: [String: Bool] = [:]
+    @Published var filter: EpisodeListFilter = .all
+    @Published var searchQuery = ""
 
     init(releaseId: Int64) { self.releaseId = releaseId }
+
+    var filteredEpisodes: [Episode] {
+        episodes.filter { episode in
+            let statusMatches: Bool
+            switch filter {
+            case .all:
+                statusMatches = true
+            case .unwatched:
+                statusMatches = !isWatched(episode)
+            case .watched:
+                statusMatches = isWatched(episode)
+            }
+            return statusMatches && episode.matchesEpisodeQuery(searchQuery)
+        }
+    }
+
+    var hasSearchQuery: Bool {
+        !searchQuery.normalizedLibrarySearchQuery.isEmpty
+    }
+
+    var watchedCount: Int {
+        episodes.filter { isWatched($0) }.count
+    }
+
+    var firstUnwatchedEpisode: Episode? {
+        episodes.first { !isWatched($0) }
+    }
 
     func isWatched(_ episode: Episode) -> Bool {
         if let v = watchedOverrides[episode.id] { return v }
@@ -106,6 +151,7 @@ struct EpisodesView: View {
         VStack(alignment: .leading, spacing: 16) {
             if !vm.types.isEmpty { typesPicker }
             if !vm.sources.isEmpty { sourcesPicker }
+            if !vm.episodes.isEmpty { episodeControls }
             Divider()
             content
         }
@@ -119,6 +165,66 @@ struct EpisodesView: View {
                 }
             })
         }
+    }
+
+    private var episodeControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                episodeSearchField
+                if let nextEpisode = vm.firstUnwatchedEpisode {
+                    Button {
+                        playing = nextEpisode
+                    } label: {
+                        Label("Продолжить", systemImage: "play.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .help("Открыть первую непросмотренную серию")
+                }
+                Spacer()
+            }
+
+            HStack(spacing: 10) {
+                Picker("Фильтр", selection: $vm.filter) {
+                    ForEach(EpisodeListFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 390)
+
+                Text("\(vm.filteredEpisodes.count)/\(vm.episodes.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Text("просмотрено \(vm.watchedCount)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+        }
+    }
+
+    private var episodeSearchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Поиск по сериям", text: $vm.searchQuery)
+                .textFieldStyle(.plain)
+            if !vm.searchQuery.isEmpty {
+                Button {
+                    vm.searchQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Очистить поиск")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: 360, alignment: .leading)
     }
 
     private var typesPicker: some View {
@@ -207,10 +313,22 @@ struct EpisodesView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 .multilineTextAlignment(.center)
+        } else if vm.filteredEpisodes.isEmpty {
+            VStack(spacing: 10) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 30))
+                    .foregroundStyle(.secondary)
+                Text("Серии не найдены")
+                    .font(.headline)
+                Text("Измени поиск или фильтр просмотра.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         } else {
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(vm.episodes) { episode in
+                    ForEach(vm.filteredEpisodes) { episode in
                         EpisodeRow(
                             episode: episode,
                             isWatched: vm.isWatched(episode),
