@@ -142,9 +142,11 @@ final class ReleaseDetailViewModel: ObservableObject {
         defer { relatedReleasesLoading = false }
         do {
             let response = try await api.searchReleases(query: seed, page: 0, searchBy: ReleaseSearchScope.title.rawValue)
-            relatedReleases = response.items
+            relatedReleases = deduplicatedReleases(response.items)
                 .filter { $0.id != release.id && isPotentiallyRelated($0, to: release) }
                 .sorted(by: chronologicalReleaseSort)
+                .prefix(12)
+                .map { $0 }
         } catch {
             relatedReleases = []
         }
@@ -201,6 +203,13 @@ final class ReleaseDetailViewModel: ObservableObject {
         }
     }
 
+    private func deduplicatedReleases(_ releases: [Release]) -> [Release] {
+        var seen = Set<Int64>()
+        return releases.filter { release in
+            seen.insert(release.id).inserted
+        }
+    }
+
     private func relatedReleaseSearchSeed(for release: Release) -> String {
         let source = release.titleOriginal ?? release.titleRu ?? release.titleAlt ?? release.displayTitle
         let parts = source
@@ -217,28 +226,114 @@ final class ReleaseDetailViewModel: ObservableObject {
         let candidateTokens = significantTitleTokens(for: candidate)
         guard !baseTokens.isEmpty, !candidateTokens.isEmpty else { return false }
         let overlap = baseTokens.intersection(candidateTokens)
-        if overlap.count >= min(2, baseTokens.count) { return true }
-        let baseTitle = normalizedTitle(release.displayTitle)
-        let candidateTitle = normalizedTitle(candidate.displayTitle)
-        return baseTitle.count > 5 && (candidateTitle.contains(baseTitle) || baseTitle.contains(candidateTitle))
+        guard !overlap.isEmpty else { return false }
+
+        let baseTitles = normalizedTitleVariants(for: release)
+        let candidateTitles = normalizedTitleVariants(for: candidate)
+        if titleStemMatches(baseTitles: baseTitles, candidateTitles: candidateTitles) {
+            return true
+        }
+        if sharesLeadingTitlePhrase(baseTitles: baseTitles, candidateTitles: candidateTitles) {
+            return true
+        }
+
+        let baseGenres = genreTokens(for: release)
+        let candidateGenres = genreTokens(for: candidate)
+        let hasGenreOverlap = !baseGenres.isEmpty
+            && !candidateGenres.isEmpty
+            && !baseGenres.isDisjoint(with: candidateGenres)
+        let strongOverlap = overlap.filter { $0.count >= 6 && !weakSingleTokenMatches.contains($0) }
+        return hasGenreOverlap && strongOverlap.count >= 2
     }
 
     private func significantTitleTokens(for release: Release) -> Set<String> {
+        Set(normalizedTitleVariants(for: release).flatMap(significantTokens(in:)))
+    }
+
+    private func genreTokens(for release: Release) -> Set<String> {
+        guard let genres = release.genres else { return [] }
+        return Set(
+            genres
+                .split { [",", ";", "/", "|"].contains(String($0)) }
+                .map { normalizedTitle(String($0)) }
+                .filter { !$0.isEmpty }
+        )
+    }
+
+    private func normalizedTitleVariants(for release: Release) -> [String] {
         let titles = [release.titleOriginal, release.titleRu, release.titleAlt, release.displayTitle]
-        let stopwords: Set<String> = [
-            "season", "сезон", "part", "часть", "movie", "film", "фильм", "ova", "ona",
-            "special", "спешл", "tv", "the", "and", "no", "of", "s"
-        ]
-        var tokens: [String] = []
-        for title in titles.compactMap({ $0 }) {
-            for rawToken in normalizedTitle(title).split(separator: " ") {
-                let token = String(rawToken)
-                if token.count > 1, !stopwords.contains(token), Int(token) == nil {
-                    tokens.append(token)
+        var seen = Set<String>()
+        return titles.compactMap { $0?.nilIfBlank }
+            .map(normalizedTitle)
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0).inserted }
+    }
+
+    private func significantTokens(in normalizedTitle: String) -> [String] {
+        normalizedTitle.split(separator: " ").compactMap { rawToken in
+            let token = String(rawToken)
+            guard token.count > 1, Int(token) == nil, !titleStopwords.contains(token) else {
+                return nil
+            }
+            return token
+        }
+    }
+
+    private func titleStemMatches(baseTitles: [String], candidateTitles: [String]) -> Bool {
+        for baseTitle in baseTitles.map(normalizedTitleStem) where baseTitle.count >= 8 {
+            for candidateTitle in candidateTitles.map(normalizedTitleStem) where candidateTitle.count >= 8 {
+                if baseTitle == candidateTitle { return true }
+                if candidateTitle.hasPrefix("\(baseTitle) ") || baseTitle.hasPrefix("\(candidateTitle) ") {
+                    return true
                 }
             }
         }
-        return Set(tokens)
+        return false
+    }
+
+    private func sharesLeadingTitlePhrase(baseTitles: [String], candidateTitles: [String]) -> Bool {
+        for baseTitle in baseTitles {
+            let baseTokens = significantTokens(in: baseTitle)
+            guard !baseTokens.isEmpty else { continue }
+            for candidateTitle in candidateTitles {
+                let candidateTokens = significantTokens(in: candidateTitle)
+                guard !candidateTokens.isEmpty else { continue }
+                let prefixCount = sharedPrefixCount(baseTokens, candidateTokens)
+                if prefixCount >= 2 { return true }
+                if prefixCount == 1,
+                   isSafeSingleTokenFranchiseMatch(baseTokens: baseTokens, candidateTokens: candidateTokens) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private func sharedPrefixCount(_ lhs: [String], _ rhs: [String]) -> Int {
+        var count = 0
+        for (left, right) in zip(lhs, rhs) {
+            guard left == right else { break }
+            count += 1
+        }
+        return count
+    }
+
+    private func isSafeSingleTokenFranchiseMatch(baseTokens: [String], candidateTokens: [String]) -> Bool {
+        let token = baseTokens[0]
+        guard token == candidateTokens[0], token.count >= 6, !weakSingleTokenMatches.contains(token) else {
+            return false
+        }
+        return baseTokens.count == 1 || candidateTokens.count == 1
+    }
+
+    private func normalizedTitleStem(_ title: String) -> String {
+        let tokens = significantTokens(in: title)
+        var kept: [String] = []
+        for token in tokens {
+            if titleStemBreakers.contains(token) { break }
+            kept.append(token)
+        }
+        return kept.joined(separator: " ")
     }
 
     private func normalizedTitle(_ title: String) -> String {
@@ -247,6 +342,32 @@ final class ReleaseDetailViewModel: ObservableObject {
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
             .joined(separator: " ")
+    }
+
+    private var titleStopwords: Set<String> {
+        [
+            "season", "сезон", "part", "часть", "movie", "film", "фильм", "ova", "она", "ona",
+            "special", "спешл", "tv", "the", "and", "no", "of", "s", "wa", "ga", "wo",
+            "o", "ni", "de", "to", "e", "ya", "yo", "san", "kun", "chan", "dono", "sama",
+            "anime", "аниме", "series", "сериал", "edition", "версия", "remake", "выпуск",
+            "this", "that", "это", "эта", "этот", "мой", "моя", "его", "ее", "её"
+        ]
+    }
+
+    private var titleStemBreakers: Set<String> {
+        [
+            "season", "сезон", "part", "часть", "movie", "film", "фильм", "ova", "она", "ona",
+            "special", "спешл", "tv", "remake", "edition", "версия"
+        ]
+    }
+
+    private var weakSingleTokenMatches: Set<String> {
+        [
+            "dragon", "дракон", "love", "любовь", "koi", "ai", "story", "история",
+            "world", "мир", "life", "жизнь", "magic", "магия", "school", "школа",
+            "hero", "герой", "girl", "девушка", "boy", "парень", "idol", "days",
+            "blue", "red", "white", "black", "last", "new", "project"
+        ]
     }
 
     private func chronologicalReleaseSort(_ lhs: Release, _ rhs: Release) -> Bool {
@@ -354,6 +475,18 @@ struct ReleaseDetailView: View {
                             .font(.title3)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
+                    }
+                    if !release.genreList.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Жанры")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            FlowLayout(spacing: 8, rowSpacing: 8) {
+                                ForEach(release.genreList, id: \.self) { genre in
+                                    Tag(text: genre)
+                                }
+                            }
+                        }
                     }
                     FlowLayout(spacing: 8, rowSpacing: 8) {
                         if let year = release.year { Tag(text: year, systemImage: "calendar") }
@@ -519,17 +652,6 @@ struct ReleaseDetailView: View {
         VStack(alignment: .leading, spacing: 22) {
             releaseDescriptionSection(for: release)
             releaseInfoSection(for: release)
-            genresSection(for: release)
-        }
-    }
-
-    private func releaseDescriptionSection(for release: Release) -> some View {
-        releaseSection(title: "Описание", icon: "text.alignleft") {
-            Text(release.description?.nilIfBlank ?? "Описание отсутствует.")
-                .font(.callout)
-                .lineSpacing(4)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -547,17 +669,13 @@ struct ReleaseDetailView: View {
         }
     }
 
-    @ViewBuilder
-    private func genresSection(for release: Release) -> some View {
-        let genres = release.genreList
-        if !genres.isEmpty {
-            releaseSection(title: "Жанры", icon: "tag") {
-                FlowLayout(spacing: 8, rowSpacing: 8) {
-                    ForEach(genres, id: \.self) { genre in
-                        Tag(text: genre)
-                    }
-                }
-            }
+    private func releaseDescriptionSection(for release: Release) -> some View {
+        releaseSection(title: "Описание", icon: "text.alignleft") {
+            Text(release.description?.nilIfBlank ?? "Описание отсутствует.")
+                .font(.callout)
+                .lineSpacing(4)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
