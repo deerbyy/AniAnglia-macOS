@@ -17,6 +17,14 @@ final class ProfileViewModel: ObservableObject {
     @Published var friendsHasMore = true
     @Published var friendsLoading = false
     @Published var friendsError: String?
+    @Published var friendRequestScope: FriendRequestScope = .incoming
+    @Published var friendRequests: [Profile] = []
+    @Published var friendRequestsPage = 0
+    @Published var friendRequestsHasMore = true
+    @Published var friendRequestsLoading = false
+    @Published var friendRequestsError: String?
+    @Published var friendActionIds: Set<Int64> = []
+    @Published var friendActionMessage: String?
 
     func setPrefetchedProfile(_ profile: Profile?) {
         guard self.profile == nil else { return }
@@ -83,6 +91,80 @@ final class ProfileViewModel: ObservableObject {
         }
     }
 
+    func loadFriendRequests(api: AnixartAPI, reset: Bool = false) async {
+        guard api.auth.isAuthenticated, !friendRequestsLoading else { return }
+        if reset {
+            friendRequestsPage = 0
+            friendRequestsHasMore = true
+            friendRequests = []
+        }
+        guard friendRequestsHasMore else { return }
+
+        friendRequestsLoading = true
+        friendRequestsError = nil
+        defer { friendRequestsLoading = false }
+
+        let page = friendRequestsPage
+        do {
+            let resp = try await api.friendRequests(scope: friendRequestScope, page: page)
+            let incoming = resp.items
+            if page == 0 {
+                friendRequests = incoming
+            } else {
+                let known = Set(friendRequests.map(\.id))
+                friendRequests.append(contentsOf: incoming.filter { !known.contains($0.id) })
+            }
+            if let totalPages = resp.totalPageCount, totalPages > 0 {
+                friendRequestsHasMore = page + 1 < totalPages
+            } else {
+                friendRequestsHasMore = !incoming.isEmpty
+            }
+            friendRequestsPage = page + 1
+        } catch {
+            friendRequestsError = error.localizedDescription
+        }
+    }
+
+    func setFriendRequestScope(_ scope: FriendRequestScope, api: AnixartAPI) async {
+        guard scope != friendRequestScope else { return }
+        friendRequestScope = scope
+        await loadFriendRequests(api: api, reset: true)
+    }
+
+    func sendFriendRequest(api: AnixartAPI, profile: Profile) async {
+        await performFriendAction(profile: profile) {
+            try await api.sendFriendRequest(profileId: profile.id)
+            friendActionMessage = "Заявка отправлена"
+        }
+    }
+
+    func acceptFriendRequest(api: AnixartAPI, profile: Profile) async {
+        await performFriendAction(profile: profile) {
+            try await api.sendFriendRequest(profileId: profile.id)
+            removeFriendRequestLocally(profile)
+            if let profileId = api.auth.profileId {
+                await loadFriends(api: api, profileId: profileId, reset: true)
+            }
+            friendActionMessage = "Заявка принята"
+        }
+    }
+
+    func removeFriendRequest(api: AnixartAPI, profile: Profile) async {
+        await performFriendAction(profile: profile) {
+            try await api.removeFriendRequest(profileId: profile.id)
+            removeFriendRequestLocally(profile)
+            friendActionMessage = friendRequestScope == .incoming ? "Заявка отклонена" : "Заявка отменена"
+        }
+    }
+
+    func hideFriendRequest(api: AnixartAPI, profile: Profile) async {
+        await performFriendAction(profile: profile) {
+            try await api.hideFriendRequest(profileId: profile.id)
+            removeFriendRequestLocally(profile)
+            friendActionMessage = "Заявка скрыта"
+        }
+    }
+
     func syncAccount(api: AnixartAPI, auth: AuthStore, syncStore: BookmarkSyncStore) async {
         guard auth.isAuthenticated else { return }
         isWorking = true
@@ -90,6 +172,7 @@ final class ProfileViewModel: ObservableObject {
         if let profileId = auth.profileId {
             await loadProfile(id: profileId, api: api)
             await loadFriends(api: api, profileId: profileId, reset: true)
+            await loadFriendRequests(api: api, reset: true)
         }
         await loadBookmarkPreviews(api: api, syncStore: syncStore, force: true)
     }
@@ -122,6 +205,23 @@ final class ProfileViewModel: ObservableObject {
         default: return fallback ?? "Anixart отклонил вход (code=\(code))"
         }
     }
+
+    private func performFriendAction(profile: Profile, action: () async throws -> Void) async {
+        guard !friendActionIds.contains(profile.id) else { return }
+        friendActionIds.insert(profile.id)
+        friendRequestsError = nil
+        friendActionMessage = nil
+        defer { friendActionIds.remove(profile.id) }
+        do {
+            try await action()
+        } catch {
+            friendRequestsError = error.localizedDescription
+        }
+    }
+
+    private func removeFriendRequestLocally(_ profile: Profile) {
+        friendRequests.removeAll { $0.id == profile.id }
+    }
 }
 
 struct ProfileView: View {
@@ -152,12 +252,21 @@ struct ProfileView: View {
             await vm.loadProfile(id: id, api: appState.api)
             await vm.loadFriends(api: appState.api, profileId: id, reset: true)
             if isViewingCurrentProfile && appState.auth.isAuthenticated {
+                await vm.loadFriendRequests(api: appState.api, reset: true)
                 await vm.loadBookmarkPreviews(api: appState.api, syncStore: appState.bookmarkSync)
             }
         }
         .sheet(item: $playingProfileVideo) { video in
             VideoPlayerSheet(video: video)
         }
+        .alert("Друзья", isPresented: Binding(
+            get: { vm.friendActionMessage != nil },
+            set: { if !$0 { vm.friendActionMessage = nil } }
+        ), actions: {
+            Button("OK") { vm.friendActionMessage = nil }
+        }, message: {
+            Text(vm.friendActionMessage ?? "")
+        })
     }
 
     @ViewBuilder
@@ -300,10 +409,23 @@ struct ProfileView: View {
                         vm.profile = nil
                         vm.previews = [:]
                         vm.friends = []
+                        vm.friendRequests = []
                     } label: {
                         Label("Выйти", systemImage: "rectangle.portrait.and.arrow.right")
                     }
                 } else {
+                    if appState.auth.isAuthenticated {
+                        Button {
+                            Task { await vm.sendFriendRequest(api: appState.api, profile: profile) }
+                        } label: {
+                            if vm.friendActionIds.contains(profile.id) {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Добавить в друзья", systemImage: "person.badge.plus")
+                            }
+                        }
+                        .disabled(vm.friendActionIds.contains(profile.id))
+                    }
                     Button {
                         Task {
                             await vm.loadProfile(id: profile.id, api: appState.api)
@@ -468,12 +590,100 @@ struct ProfileView: View {
     private func profileActivitySections(for profile: Profile) -> some View {
         VStack(alignment: .leading, spacing: 18) {
             watchDynamicsSection(for: profile)
+            if isViewingCurrentProfile && appState.auth.isAuthenticated {
+                friendRequestsSection
+            }
             friendsSection(for: profile)
             releasePreviewSection(title: "Оценки релизов", icon: "star.leadinghalf.filled", releases: profile.votes)
             releasePreviewSection(title: "Просмотрено недавно", icon: "clock.arrow.circlepath", releases: profile.history)
             collectionsPreviewSection(for: profile)
             commentsPreviewSection(for: profile)
             videosPreviewSection(for: profile)
+        }
+    }
+
+    @ViewBuilder
+    private var friendRequestsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Заявки в друзья", systemImage: "person.crop.circle.badge.questionmark")
+                    .font(.title3.bold())
+                Spacer()
+                Picker("Тип заявок", selection: Binding(
+                    get: { vm.friendRequestScope },
+                    set: { scope in Task { await vm.setFriendRequestScope(scope, api: appState.api) } }
+                )) {
+                    ForEach(FriendRequestScope.allCases) { scope in
+                        Text(scope.title).tag(scope)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+                Button {
+                    Task { await vm.loadFriendRequests(api: appState.api, reset: true) }
+                } label: {
+                    if vm.friendRequestsLoading && vm.friendRequests.isEmpty {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(vm.friendRequestsLoading)
+                .help("Обновить заявки")
+            }
+
+            if let error = vm.friendRequestsError, vm.friendRequests.isEmpty {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            } else if vm.friendRequests.isEmpty && vm.friendRequestsLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if vm.friendRequests.isEmpty {
+                Text(vm.friendRequestScope == .incoming ? "Входящих заявок нет." : "Исходящих заявок нет.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(vm.friendRequests) { profile in
+                            FriendRequestCard(
+                                profile: profile,
+                                scope: vm.friendRequestScope,
+                                isWorking: vm.friendActionIds.contains(profile.id),
+                                onAccept: { Task { await vm.acceptFriendRequest(api: appState.api, profile: profile) } },
+                                onRemove: { Task { await vm.removeFriendRequest(api: appState.api, profile: profile) } },
+                                onHide: { Task { await vm.hideFriendRequest(api: appState.api, profile: profile) } }
+                            )
+                        }
+
+                        if vm.friendRequestsHasMore {
+                            Button {
+                                Task { await vm.loadFriendRequests(api: appState.api) }
+                            } label: {
+                                VStack(spacing: 8) {
+                                    if vm.friendRequestsLoading {
+                                        ProgressView().controlSize(.small)
+                                    } else {
+                                        Image(systemName: "chevron.right.circle")
+                                            .font(.title2)
+                                    }
+                                    Text("Ещё")
+                                        .font(.caption.weight(.medium))
+                                }
+                                .frame(width: 96, height: 146)
+                                .background(Color.secondary.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(vm.friendRequestsLoading)
+                        }
+                    }
+                    .padding(.bottom, 4)
+                }
+            }
         }
     }
 
@@ -833,6 +1043,84 @@ private struct ProfileVideoPreviewCard: View {
             }
         }
         .frame(width: 220, alignment: .leading)
+    }
+}
+
+private struct FriendRequestCard: View {
+    let profile: Profile
+    let scope: FriendRequestScope
+    let isWorking: Bool
+    let onAccept: () -> Void
+    let onRemove: () -> Void
+    let onHide: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            NavigationLink(value: ProfileRoute(profile)) {
+                HStack(spacing: 10) {
+                    RemoteImage(url: profile.avatarURL, contentMode: .fill) {
+                        Circle()
+                            .fill(Color.secondary.opacity(0.12))
+                            .overlay(Image(systemName: "person.fill").foregroundStyle(.secondary))
+                    }
+                    .frame(width: 42, height: 42)
+                    .clipShape(Circle())
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(profile.displayName)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                        if profile.isOnline == true {
+                            Text("Онлайн")
+                                .font(.caption2)
+                                .foregroundStyle(.green)
+                        } else if let status = profile.status, !status.isEmpty {
+                            Text(status)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isWorking {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, minHeight: 28)
+            } else if scope == .incoming {
+                HStack(spacing: 6) {
+                    Button("Принять", action: onAccept)
+                        .buttonStyle(.borderedProminent)
+                    Menu {
+                        Button(role: .destructive, action: onRemove) {
+                            Label("Отклонить", systemImage: "xmark")
+                        }
+                        Button(action: onHide) {
+                            Label("Скрыть", systemImage: "eye.slash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                }
+                .controlSize(.small)
+            } else {
+                Button(role: .destructive, action: onRemove) {
+                    Label("Отменить", systemImage: "xmark")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .frame(width: 210, height: 146, alignment: .topLeading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 

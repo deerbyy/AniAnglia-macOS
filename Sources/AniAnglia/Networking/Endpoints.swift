@@ -306,6 +306,29 @@ extension AnixartAPI {
         try await get("profile/friend/all/\(profileId)/\(page)")
     }
 
+    func friendRequests(scope: FriendRequestScope, page: Int = 0) async throws -> ProfilesResponse {
+        try await get("profile/friend/requests/\(scope.rawValue)/\(page)")
+    }
+
+    func latestFriendRequests(scope: FriendRequestScope) async throws -> ProfilesResponse {
+        try await get("profile/friend/requests/\(scope.rawValue)/last")
+    }
+
+    @discardableResult
+    func sendFriendRequest(profileId: Int64) async throws -> SimpleResponse {
+        try await get("profile/friend/request/send/\(profileId)")
+    }
+
+    @discardableResult
+    func removeFriendRequest(profileId: Int64) async throws -> SimpleResponse {
+        try await get("profile/friend/request/remove/\(profileId)")
+    }
+
+    @discardableResult
+    func hideFriendRequest(profileId: Int64) async throws -> SimpleResponse {
+        try await get("profile/friend/request/hide/\(profileId)")
+    }
+
     // MARK: - Auth
 
     func signIn(login: String, password: String) async throws -> SignInResponse {

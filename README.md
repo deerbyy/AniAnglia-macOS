@@ -54,6 +54,11 @@ Screenshots should be captured from the first full Xcode/CI run and added here w
 - `GET /profile/list/all/{profile_id}/{list_id}/{page}`
 - `GET /profile/{profile_id}`
 - `GET /profile/friend/all/{profile_id}/{page}`
+- `GET /profile/friend/requests/{type}/{page}`
+- `GET /profile/friend/requests/{type}/last`
+- `GET /profile/friend/request/send/{profile_id}`
+- `GET /profile/friend/request/remove/{profile_id}`
+- `GET /profile/friend/request/hide/{profile_id}`
 
 `POST /search/releases/{page}` uses a JSON body, for example `{"query":"naruto","searchBy":0}`.
 

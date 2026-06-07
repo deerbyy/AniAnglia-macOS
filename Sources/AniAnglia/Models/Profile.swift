@@ -264,6 +264,20 @@ struct ProfileRoute: Hashable {
     }
 }
 
+enum FriendRequestScope: Int, CaseIterable, Identifiable, Hashable {
+    case incoming = 0
+    case outgoing = 1
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .incoming: return "Входящие"
+        case .outgoing: return "Исходящие"
+        }
+    }
+}
+
 struct ProfileRole: Codable, Identifiable, Hashable {
     let id: Int64
     let name: String
