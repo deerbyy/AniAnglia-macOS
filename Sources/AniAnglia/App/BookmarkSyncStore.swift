@@ -221,11 +221,17 @@ final class BookmarkSyncStore: ObservableObject {
     }
 
     private func applySyncedStatus(release: Release, category: BookmarkCategory?) {
+        let updatedAt = currentTimestamp()
         for existingCategory in BookmarkCategory.allCases {
             releasesByCategory[existingCategory] = releases(for: existingCategory).filter { $0.id != release.id }
         }
+        favoriteReleases = favoriteReleases.map { existing in
+            existing.id == release.id
+                ? existing.withProfileListStatus(category?.rawValue, updatedAt: updatedAt)
+                : existing
+        }
         if let category {
-            let syncedRelease = release.withProfileListStatus(category.rawValue, updatedAt: currentTimestamp())
+            let syncedRelease = release.withProfileListStatus(category.rawValue, updatedAt: updatedAt)
             var releases = releases(for: category)
             releases.insert(syncedRelease, at: 0)
             releasesByCategory[category] = sortedListReleases(deduplicated(releases), category: category, sort: currentReleaseSort)

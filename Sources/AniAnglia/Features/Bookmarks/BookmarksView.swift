@@ -68,6 +68,8 @@ private struct BookmarksContent: View {
     @Binding var section: AccountLibrarySection
     @Binding var sort: ProfileListSort
     @Binding var searchQuery: String
+    @State private var pendingReleaseIds: Set<Int64> = []
+    @State private var pendingCollectionIds: Set<Int64> = []
 
     private var sectionPicker: some View {
         Picker("", selection: $section) {
@@ -147,6 +149,9 @@ private struct BookmarksContent: View {
                             CollectionCard(collection: collection)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            collectionContextMenu(for: collection)
+                        }
                     }
                 }
                 .padding()
@@ -159,6 +164,9 @@ private struct BookmarksContent: View {
                             ReleaseCard(release: release)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            releaseContextMenu(for: release)
+                        }
                     }
                 }
                 .padding()
@@ -199,6 +207,14 @@ private struct BookmarksContent: View {
 
             content
         }
+        .alert("Не удалось", isPresented: Binding(
+            get: { syncStore.errorMessage != nil },
+            set: { if !$0 { syncStore.errorMessage = nil } }
+        ), actions: {
+            Button("OK") { syncStore.errorMessage = nil }
+        }, message: {
+            Text(syncStore.errorMessage ?? "")
+        })
     }
 
     private var emptySearchState: some View {
@@ -251,6 +267,130 @@ private struct BookmarksContent: View {
             await syncStore.syncFavoriteCollections(api: appState.api, force: force)
         case .list(let category):
             await syncStore.syncCategory(api: appState.api, category: category, sort: sort, force: force)
+        }
+    }
+
+    @ViewBuilder
+    private func releaseContextMenu(for release: Release) -> some View {
+        let currentCategory = currentCategory(for: release)
+        let isFavorite = isFavoriteRelease(release)
+        let isPending = pendingReleaseIds.contains(release.id)
+
+        Menu("Список") {
+            ForEach(BookmarkCategory.displayOrder) { category in
+                Button {
+                    setReleaseStatus(release, category: category)
+                } label: {
+                    Label(category.title, systemImage: currentCategory == category ? "checkmark" : "bookmark")
+                }
+                .disabled(isPending || currentCategory == category)
+            }
+
+            if currentCategory != nil {
+                Divider()
+                Button(role: .destructive) {
+                    setReleaseStatus(release, category: nil)
+                } label: {
+                    Label("Убрать из списка", systemImage: "bookmark.slash")
+                }
+                .disabled(isPending)
+            }
+        }
+
+        Button(role: isFavorite ? .destructive : nil) {
+            setReleaseFavorite(release, isFavorite: !isFavorite)
+        } label: {
+            Label(isFavorite ? "Убрать из избранного" : "В избранное",
+                  systemImage: isFavorite ? "star.slash" : "star")
+        }
+        .disabled(isPending)
+    }
+
+    @ViewBuilder
+    private func collectionContextMenu(for collection: AnixartCollection) -> some View {
+        let isFavorite = collection.isFavorite == true || syncStore.favoriteCollections.contains { $0.id == collection.id }
+        let isPending = pendingCollectionIds.contains(collection.id)
+
+        Button(role: isFavorite ? .destructive : nil) {
+            setCollectionFavorite(collection, isFavorite: !isFavorite)
+        } label: {
+            Label(isFavorite ? "Убрать из избранных коллекций" : "В избранные коллекции",
+                  systemImage: isFavorite ? "star.slash" : "star")
+        }
+        .disabled(isPending)
+    }
+
+    private func currentCategory(for release: Release) -> BookmarkCategory? {
+        if let rawValue = release.profileListStatus,
+           let category = BookmarkCategory(rawValue: rawValue) {
+            return category
+        }
+        if case .list(let category) = section,
+           syncStore.releases(for: category).contains(where: { $0.id == release.id }) {
+            return category
+        }
+        return BookmarkCategory.displayOrder.first { category in
+            syncStore.releases(for: category).contains { $0.id == release.id }
+        }
+    }
+
+    private func isFavoriteRelease(_ release: Release) -> Bool {
+        release.isFavorite == true
+            || section == .favorites
+            || syncStore.favoriteReleases.contains { $0.id == release.id }
+    }
+
+    private func releaseForMutation(_ release: Release) -> Release {
+        release
+            .withProfileListStatus(currentCategory(for: release)?.rawValue)
+            .withFavorite(isFavoriteRelease(release))
+    }
+
+    private func setReleaseStatus(_ release: Release, category: BookmarkCategory?) {
+        Task { @MainActor in
+            pendingReleaseIds.insert(release.id)
+            defer { pendingReleaseIds.remove(release.id) }
+            do {
+                try await syncStore.setStatus(
+                    api: appState.api,
+                    release: releaseForMutation(release),
+                    category: category
+                )
+            } catch {
+                syncStore.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func setReleaseFavorite(_ release: Release, isFavorite: Bool) {
+        Task { @MainActor in
+            pendingReleaseIds.insert(release.id)
+            defer { pendingReleaseIds.remove(release.id) }
+            do {
+                try await syncStore.setFavorite(
+                    api: appState.api,
+                    release: releaseForMutation(release),
+                    isFavorite: isFavorite
+                )
+            } catch {
+                syncStore.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func setCollectionFavorite(_ collection: AnixartCollection, isFavorite: Bool) {
+        Task { @MainActor in
+            pendingCollectionIds.insert(collection.id)
+            defer { pendingCollectionIds.remove(collection.id) }
+            do {
+                try await syncStore.setFavoriteCollection(
+                    api: appState.api,
+                    collection: collection,
+                    isFavorite: isFavorite
+                )
+            } catch {
+                syncStore.errorMessage = error.localizedDescription
+            }
         }
     }
 }
