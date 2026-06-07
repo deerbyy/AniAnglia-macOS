@@ -531,7 +531,11 @@ struct ProfileView: View {
                 accountMetric("Коллекции", profile.collectionCount, "rectangle.stack")
                 accountMetric("Избр. коллекции", currentProfileOnly(appState.bookmarkSync.favoriteCollectionsCount), "star.square")
                 accountMetric("Видео", profile.videoCount, "film")
-                accountMetric("Друзья", profile.friendCount, "person.2")
+                NavigationLink(value: ProfileFriendsRoute(profileId: profile.id, profileName: profile.displayName, totalCount: profile.friendCount)) {
+                    accountMetric("Друзья", profile.friendCount, "person.2")
+                }
+                .buttonStyle(.plain)
+                .help("Открыть список друзей")
                 accountMetric("Рейтинг", profile.ratingScore, "chart.line.uptrend.xyaxis")
                 if let watchedTime = profile.watchedTimeText {
                     accountMetric("Время просмотра", watchedTime, "clock")
@@ -742,6 +746,10 @@ struct ProfileView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    NavigationLink(value: ProfileFriendsRoute(profileId: profile.id, profileName: profile.displayName, totalCount: profile.friendCount)) {
+                        Label("Все", systemImage: "list.bullet")
+                    }
+                    .buttonStyle(.borderless)
                     Button {
                         Task { await vm.loadFriends(api: appState.api, profileId: profile.id, reset: true) }
                     } label: {

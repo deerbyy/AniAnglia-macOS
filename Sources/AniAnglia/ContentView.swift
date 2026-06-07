@@ -41,6 +41,9 @@ struct ContentView: View {
                 .navigationDestination(for: ProfileListRoute.self) { route in
                     ProfileListView(route: route)
                 }
+                .navigationDestination(for: ProfileFriendsRoute.self) { route in
+                    ProfileFriendsView(route: route)
+                }
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
