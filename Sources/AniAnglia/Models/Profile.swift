@@ -285,6 +285,18 @@ struct ProfileRoute: Hashable {
     }
 }
 
+struct ProfileListRoute: Hashable {
+    let profileId: Int64
+    let profileName: String?
+    let category: BookmarkCategory
+
+    init(profileId: Int64, profileName: String? = nil, category: BookmarkCategory) {
+        self.profileId = profileId
+        self.profileName = profileName
+        self.category = category
+    }
+}
+
 enum FriendRequestScope: Int, CaseIterable, Identifiable, Hashable {
     case incoming = 0
     case outgoing = 1

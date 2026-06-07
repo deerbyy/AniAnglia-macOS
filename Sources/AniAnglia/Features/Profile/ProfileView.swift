@@ -492,7 +492,11 @@ struct ProfileView: View {
                     .buttonStyle(.plain)
                     .help("Открыть «\(category.title)»")
                 } else {
-                    profileListStatTile(title: category.title, value: count)
+                    NavigationLink(value: ProfileListRoute(profileId: profile.id, profileName: profile.displayName, category: category)) {
+                        profileListStatTile(title: category.title, value: count)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Открыть «\(category.title)» пользователя \(profile.displayName)")
                 }
             }
         }

@@ -147,9 +147,18 @@ extension AnixartAPI {
     /// Категория как в libanixart `Profile::ListStatus`: 1=Смотрю, 2=В планах, 3=Просмотрено, 4=Отложено, 5=Брошено.
     func bookmarks(category: Int, page: Int = 0, sort: ProfileListSort = .dateAddedNewest) async throws -> ReleasesResponse {
         guard let pid = auth.profileId else { throw APIError.server(code: 401, message: "Не авторизован") }
-        return try await get("profile/list/all/\(pid)/\(category)/\(page)", query: [
+        return try await profileListReleases(profileId: pid, category: category, page: page, sort: sort)
+    }
+
+    /// Public profile list category. If the owner hides lists, the API returns an error or an empty page.
+    func profileListReleases(profileId: Int64, category: Int, page: Int = 0, sort: ProfileListSort = .dateAddedNewest) async throws -> ReleasesResponse {
+        try await get("profile/list/all/\(profileId)/\(category)/\(page)", query: [
             URLQueryItem(name: "sort", value: String(sort.rawValue))
         ])
+    }
+
+    func profileListReleases(profileId: Int64, category: BookmarkCategory, page: Int = 0, sort: ProfileListSort = .dateAddedNewest) async throws -> ReleasesResponse {
+        try await profileListReleases(profileId: profileId, category: category.rawValue, page: page, sort: sort)
     }
 
     func bookmarks(category: BookmarkCategory, page: Int = 0, sort: ProfileListSort = .dateAddedNewest) async throws -> ReleasesResponse {
