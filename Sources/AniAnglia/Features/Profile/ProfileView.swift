@@ -548,19 +548,56 @@ struct ProfileView: View {
                         .font(.headline)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            ForEach(profile.socialLinks, id: \.title) { item in
-                                Text("\(item.title): \(item.value)")
-                                    .font(.caption)
-                                    .lineLimit(1)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 5)
-                                    .background(Color.secondary.opacity(0.1))
-                                    .clipShape(Capsule())
+                            ForEach(profile.socialLinks) { item in
+                                if let url = item.url {
+                                    Link(destination: url) {
+                                        socialLinkChip(item, isClickable: true)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Открыть \(item.title)")
+                                } else {
+                                    socialLinkChip(item, isClickable: false)
+                                        .textSelection(.enabled)
+                                        .help("Ссылка не указана, можно выделить значение")
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+
+    private func socialLinkChip(_ item: ProfileSocialLink, isClickable: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: socialLinkIcon(for: item.kind))
+                .frame(width: 13)
+            Text(item.title)
+                .fontWeight(.semibold)
+            Text(item.value)
+                .foregroundStyle(.secondary)
+            if isClickable {
+                Image(systemName: "arrow.up.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
+        .lineLimit(1)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(isClickable ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.1))
+        .foregroundStyle(isClickable ? Color.accentColor : Color.primary)
+        .clipShape(Capsule())
+    }
+
+    private func socialLinkIcon(for kind: ProfileSocialLink.Kind) -> String {
+        switch kind {
+        case .telegram: "paperplane"
+        case .vk: "person.2.wave.2"
+        case .instagram: "camera"
+        case .discord: "gamecontroller"
+        case .tiktok: "music.note"
         }
     }
 

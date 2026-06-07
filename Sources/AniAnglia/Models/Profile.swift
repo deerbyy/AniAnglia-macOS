@@ -1,5 +1,111 @@
 import Foundation
 
+struct ProfileSocialLink: Identifiable, Hashable {
+    enum Kind: String, Hashable {
+        case telegram
+        case vk
+        case instagram
+        case discord
+        case tiktok
+
+        var title: String {
+            switch self {
+            case .telegram: "Telegram"
+            case .vk: "VK"
+            case .instagram: "Instagram"
+            case .discord: "Discord"
+            case .tiktok: "TikTok"
+            }
+        }
+    }
+
+    let kind: Kind
+    let value: String
+    let url: URL?
+
+    var id: String { kind.rawValue }
+    var title: String { kind.title }
+
+    init?(kind: Kind, value: String?) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return nil }
+        self.kind = kind
+        self.value = trimmed
+        url = kind.normalizedURL(for: trimmed)
+    }
+}
+
+private extension ProfileSocialLink.Kind {
+    func normalizedURL(for value: String) -> URL? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let absoluteURL = Self.absoluteWebURL(from: trimmed) {
+            return absoluteURL
+        }
+
+        switch self {
+        case .telegram:
+            if let url = Self.domainURL(from: trimmed, domains: ["t.me", "telegram.me"]) {
+                return url
+            }
+            return Self.handleURL(prefix: "https://t.me/", value: trimmed)
+        case .vk:
+            if let url = Self.domainURL(from: trimmed, domains: ["vk.com", "m.vk.com"]) {
+                return url
+            }
+            return Self.handleURL(prefix: "https://vk.com/", value: trimmed)
+        case .instagram:
+            if let url = Self.domainURL(from: trimmed, domains: ["instagram.com", "www.instagram.com"]) {
+                return url
+            }
+            return Self.handleURL(prefix: "https://instagram.com/", value: trimmed)
+        case .discord:
+            return Self.domainURL(from: trimmed, domains: ["discord.gg", "discord.com", "discordapp.com"])
+        case .tiktok:
+            if let url = Self.domainURL(from: trimmed, domains: ["tiktok.com", "www.tiktok.com"]) {
+                return url
+            }
+            return Self.handleURL(prefix: "https://www.tiktok.com/@", value: trimmed)
+        }
+    }
+
+    private static func absoluteWebURL(from value: String) -> URL? {
+        let candidate = value.hasPrefix("//") ? "https:\(value)" : value
+        guard
+            let url = URL(string: candidate),
+            let scheme = url.scheme?.lowercased(),
+            ["http", "https"].contains(scheme),
+            url.host?.isEmpty == false
+        else {
+            return nil
+        }
+        return url
+    }
+
+    private static func domainURL(from value: String, domains: [String]) -> URL? {
+        let lowercased = value.lowercased()
+        guard domains.contains(where: { lowercased == $0 || lowercased.hasPrefix("\($0)/") }) else {
+            return nil
+        }
+        return absoluteWebURL(from: "https://\(value)")
+    }
+
+    private static func handleURL(prefix: String, value: String) -> URL? {
+        var handle = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if handle.hasPrefix("@") {
+            handle.removeFirst()
+        }
+        guard !handle.isEmpty, !handle.contains("/"), !handle.contains(" ") else {
+            return nil
+        }
+        let disallowed = CharacterSet(charactersIn: "/?#")
+        let allowed = CharacterSet.urlPathAllowed.subtracting(disallowed)
+        guard let encodedHandle = handle.addingPercentEncoding(withAllowedCharacters: allowed) else {
+            return nil
+        }
+        return URL(string: "\(prefix)\(encodedHandle)")
+    }
+}
+
 struct Profile: Codable, Identifiable, Hashable {
     let id: Int64
     let login: String?
@@ -57,17 +163,14 @@ struct Profile: Codable, Identifiable, Hashable {
         return "\(tailMinutes) мин"
     }
 
-    var socialLinks: [(title: String, value: String)] {
+    var socialLinks: [ProfileSocialLink] {
         [
-            ("Telegram", telegramPage),
-            ("VK", vkPage),
-            ("Instagram", instagramPage),
-            ("Discord", discordPage),
-            ("TikTok", tiktokPage)
-        ].compactMap { title, value in
-            guard let value, !value.isEmpty else { return nil }
-            return (title, value)
-        }
+            ProfileSocialLink(kind: .telegram, value: telegramPage),
+            ProfileSocialLink(kind: .vk, value: vkPage),
+            ProfileSocialLink(kind: .instagram, value: instagramPage),
+            ProfileSocialLink(kind: .discord, value: discordPage),
+            ProfileSocialLink(kind: .tiktok, value: tiktokPage)
+        ].compactMap { $0 }
     }
 
     func matchesProfileQuery(_ query: String) -> Bool {
