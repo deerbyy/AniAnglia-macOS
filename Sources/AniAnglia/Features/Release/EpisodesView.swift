@@ -16,6 +16,38 @@ enum EpisodeListFilter: String, CaseIterable, Identifiable {
     }
 }
 
+fileprivate struct EpisodePlaybackSession: Identifiable {
+    let id = UUID()
+    let episodes: [Episode]
+    var currentIndex: Int
+
+    init(episodes: [Episode], current episode: Episode) {
+        let candidates = episodes.isEmpty ? [episode] : episodes
+        self.episodes = candidates
+        self.currentIndex = candidates.firstIndex(where: { $0.id == episode.id }) ?? 0
+    }
+
+    var currentEpisode: Episode {
+        episodes[currentIndex]
+    }
+
+    var previousIndex: Int? {
+        currentIndex > episodes.startIndex ? currentIndex - 1 : nil
+    }
+
+    var nextIndex: Int? {
+        let next = currentIndex + 1
+        return episodes.indices.contains(next) ? next : nil
+    }
+
+    func firstLaterUnwatchedIndex(isWatched: (Episode) -> Bool) -> Int? {
+        for index in episodes.indices where index > currentIndex && !isWatched(episodes[index]) {
+            return index
+        }
+        return nil
+    }
+}
+
 @MainActor
 final class EpisodesViewModel: ObservableObject {
     let releaseId: Int64
@@ -83,6 +115,22 @@ final class EpisodesViewModel: ObservableObject {
         }
     }
 
+    func markWatched(_ episode: Episode, api: AnixartAPI) async {
+        guard !isWatched(episode) else { return }
+        let previousOverride = watchedOverrides[episode.id]
+        watchedOverrides[episode.id] = true
+        do {
+            _ = try await api.markEpisodeWatched(releaseId: episode.releaseId, sourceId: episode.sourceId, position: episode.position)
+        } catch {
+            if let previousOverride {
+                watchedOverrides[episode.id] = previousOverride
+            } else {
+                watchedOverrides.removeValue(forKey: episode.id)
+            }
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func loadTypes(api: AnixartAPI) async {
         isLoadingTypes = true
         defer { isLoadingTypes = false }
@@ -139,7 +187,7 @@ struct EpisodesView: View {
 
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm: EpisodesViewModel
-    @State private var playing: Episode?
+    @State private var playbackSession: EpisodePlaybackSession?
 
     init(releaseId: Int64, releaseTitle: String? = nil) {
         self.releaseId = releaseId
@@ -158,12 +206,16 @@ struct EpisodesView: View {
         .padding(20)
         .navigationTitle(releaseTitle ?? "Серии")
         .task { await vm.loadTypes(api: appState.api) }
-        .sheet(item: $playing) { episode in
-            EpisodePlayerSheet(episode: episode, releaseTitle: releaseTitle, onClosed: {
-                if appState.auth.isAuthenticated && !vm.isWatched(episode) {
-                    Task { await vm.toggleWatched(episode, api: appState.api) }
+        .sheet(item: $playbackSession) { session in
+            EpisodePlayerSheet(
+                session: session,
+                releaseTitle: releaseTitle,
+                isWatched: { episode in vm.isWatched(episode) },
+                onMarkWatched: { episode in
+                    guard appState.auth.isAuthenticated else { return }
+                    await vm.markWatched(episode, api: appState.api)
                 }
-            })
+            )
         }
     }
 
@@ -173,7 +225,7 @@ struct EpisodesView: View {
                 episodeSearchField
                 if let nextEpisode = vm.firstUnwatchedEpisode {
                     Button {
-                        playing = nextEpisode
+                        openPlayback(nextEpisode, episodes: vm.episodes)
                     } label: {
                         Label("Продолжить", systemImage: "play.fill")
                     }
@@ -333,7 +385,7 @@ struct EpisodesView: View {
                             episode: episode,
                             isWatched: vm.isWatched(episode),
                             canMark: appState.auth.isAuthenticated,
-                            onPlay: { playing = episode },
+                            onPlay: { openPlayback(episode) },
                             onToggleWatched: {
                                 Task { await vm.toggleWatched(episode, api: appState.api) }
                             }
@@ -343,6 +395,11 @@ struct EpisodesView: View {
                 }
             }
         }
+    }
+
+    private func openPlayback(_ episode: Episode, episodes: [Episode]? = nil) {
+        let candidates = episodes ?? vm.filteredEpisodes
+        playbackSession = EpisodePlaybackSession(episodes: candidates, current: episode)
     }
 }
 
@@ -397,26 +454,46 @@ private struct EpisodeRow: View {
 }
 
 struct EpisodePlayerSheet: View {
-    let episode: Episode
     let releaseTitle: String?
-    var onClosed: (() -> Void)? = nil
+    let isWatched: (Episode) -> Bool
+    let onMarkWatched: (Episode) async -> Void
+
+    @State private var session: EpisodePlaybackSession
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+
+    fileprivate init(
+        session: EpisodePlaybackSession,
+        releaseTitle: String?,
+        isWatched: @escaping (Episode) -> Bool,
+        onMarkWatched: @escaping (Episode) async -> Void
+    ) {
+        self._session = State(initialValue: session)
+        self.releaseTitle = releaseTitle
+        self.isWatched = isWatched
+        self.onMarkWatched = onMarkWatched
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(episode.name ?? "Серия \(episode.position + 1)")
+                    Text(currentEpisode.name ?? "Серия \(currentEpisode.position + 1)")
                         .font(.headline)
                     if let title = releaseTitle {
                         Text(title)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    if session.episodes.count > 1 {
+                        Text("\(session.currentIndex + 1) из \(session.episodes.count)")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
                 Spacer()
-                if let url = episode.resolvedURL {
+                playbackControls
+                if let url = currentEpisode.resolvedURL {
                     Button {
                         openURL(url)
                     } label: {
@@ -425,14 +502,14 @@ struct EpisodePlayerSheet: View {
                     .help("Открыть в Safari")
                 }
                 Button("Закрыть") {
-                    onClosed?()
+                    markCurrentWatched()
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
             }
             .padding()
             Divider()
-            if let url = episode.resolvedURL {
+            if let url = currentEpisode.resolvedURL {
                 WebView(url: url)
                     .frame(minWidth: 800, minHeight: 480)
             } else {
@@ -442,5 +519,60 @@ struct EpisodePlayerSheet: View {
             }
         }
         .frame(minWidth: 800, minHeight: 540)
+    }
+
+    private var currentEpisode: Episode {
+        session.currentEpisode
+    }
+
+    private var nextUnwatchedIndex: Int? {
+        session.firstLaterUnwatchedIndex(isWatched: isWatched)
+    }
+
+    private var playbackControls: some View {
+        HStack(spacing: 8) {
+            Button {
+                if let index = session.previousIndex {
+                    navigate(to: index)
+                }
+            } label: {
+                Label("Предыдущая", systemImage: "chevron.left")
+            }
+            .disabled(session.previousIndex == nil)
+            .help("Открыть предыдущую серию")
+
+            Button {
+                if let index = nextUnwatchedIndex {
+                    navigate(to: index)
+                }
+            } label: {
+                Label("Следующая непросмотренная", systemImage: "forward.end")
+            }
+            .disabled(nextUnwatchedIndex == nil)
+            .help("Открыть следующую непросмотренную серию")
+
+            Button {
+                if let index = session.nextIndex {
+                    navigate(to: index)
+                }
+            } label: {
+                Label("Следующая", systemImage: "chevron.right")
+            }
+            .disabled(session.nextIndex == nil)
+            .help("Открыть следующую серию")
+        }
+        .controlSize(.small)
+    }
+
+    private func navigate(to index: Int) {
+        markCurrentWatched()
+        session.currentIndex = index
+    }
+
+    private func markCurrentWatched() {
+        let episode = currentEpisode
+        Task {
+            await onMarkWatched(episode)
+        }
     }
 }

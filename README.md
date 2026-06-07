@@ -6,7 +6,7 @@ Native macOS client for the Anixart anime catalog. The app is SwiftUI-first, tar
 
 - Home screen with "Рекомендации", "Обсуждают", "Сейчас смотрят", "Коллекции недели", and "Комментарии недели" sections.
 - Debounced search with automatic pagination and Anixart search scopes: title, studio, director, author, and genre.
-- Release detail page with poster zoom, metadata, genres, expandable description, searchable/filterable episodes, screenshots, searchable/sortable related collections, searchable video blocks, comments with expandable replies, clickable comment authors, own-comment editing/deletion, and bookmark actions.
+- Release detail page with poster zoom, metadata, genres, expandable description, searchable/filterable episodes, in-player previous/next episode controls, screenshots, searchable/sortable related collections, searchable video blocks, comments with expandable replies, clickable comment authors, own-comment editing/deletion, and bookmark actions.
 - Public collections browser with search, Anixart sort modes, collection detail pages, searchable release lists, clickable collection authors, and account-synced favorite collections.
 - Automatic infinite-scroll loading for search, catalog, collections, collection releases, and watch history, with manual "load more" fallback buttons.
 - Episode and trailer playback through `WKWebView` embed players: YouTube is loaded with an explicit Anixart HTTP referrer, while Kodik/Libria iframe pages receive an Anixart origin.
@@ -105,6 +105,7 @@ Download `AniAnglia.dmg` from the GitHub Actions artifact, open it, and drag `An
 ## Not Included In MVP
 
 - Mini-player window: the code keeps a `PlayerSession` abstraction, but the floating always-on-top window is left for a later release.
+- True automatic next-episode playback: iframe players do not expose a reliable ended event yet, so the Settings flag is reserved and manual previous/next controls are used instead.
 - VK/Google OAuth: first version supports only login/password and anonymous mode.
 - Torrent downloads: intentionally excluded from the macOS MVP.
 - Full DTO coverage for all Anixart endpoints: only fields required by the implemented screens are modeled.
