@@ -4,10 +4,12 @@ import SwiftUI
 final class SearchViewModel: ObservableObject {
     @Published var query = ""
     @Published var results: [Release] = []
+    @Published var recentQueries: [String] = []
     @Published var isLoading = false
     @Published var isLoadingMore = false
     @Published var errorMessage: String?
 
+    private let recentQueriesKey = "recentSearchQueries.v1"
     private var currentTask: Task<Void, Never>?
     private var currentPage = 0
     private var totalPageCount: Int?
@@ -17,6 +19,10 @@ final class SearchViewModel: ObservableObject {
         guard !isLoading, !isLoadingMore, !results.isEmpty else { return false }
         guard let totalPageCount else { return true }
         return currentPage + 1 < totalPageCount
+    }
+
+    func loadRecentQueries() {
+        recentQueries = UserDefaults.standard.stringArray(forKey: recentQueriesKey) ?? []
     }
 
     func clear() {
@@ -57,10 +63,26 @@ final class SearchViewModel: ObservableObject {
             currentPage = 0
             totalPageCount = resp.totalPageCount
             lastSearchBy = searchBy
+            remember(query: trimmed)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func useRecentQuery(_ query: String, api: AnixartAPI, searchBy: ReleaseSearchScope) async {
+        self.query = query
+        await performSearch(api: api, query: query, searchBy: searchBy.rawValue)
+    }
+
+    func removeRecentQuery(_ query: String) {
+        recentQueries.removeAll { $0 == query }
+        saveRecentQueries()
+    }
+
+    func clearRecentQueries() {
+        recentQueries = []
+        saveRecentQueries()
     }
 
     func loadMore(api: AnixartAPI) async {
@@ -92,6 +114,19 @@ final class SearchViewModel: ObservableObject {
             seen.insert(release.id).inserted
         }
     }
+
+    private func remember(query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        recentQueries.removeAll { $0.caseInsensitiveCompare(trimmed) == .orderedSame }
+        recentQueries.insert(trimmed, at: 0)
+        recentQueries = Array(recentQueries.prefix(10))
+        saveRecentQueries()
+    }
+
+    private func saveRecentQueries() {
+        UserDefaults.standard.set(recentQueries, forKey: recentQueriesKey)
+    }
 }
 
 enum ReleaseSearchScope: Int, CaseIterable, Identifiable, Hashable {
@@ -119,6 +154,7 @@ struct SearchView: View {
     @StateObject private var vm = SearchViewModel()
     @FocusState private var searchFieldFocused: Bool
     @State private var searchScope: ReleaseSearchScope = .title
+    @State private var pendingReleaseIds: Set<Int64> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -127,7 +163,18 @@ struct SearchView: View {
             content
         }
         .navigationTitle("Поиск")
-        .onAppear { searchFieldFocused = true }
+        .alert("Не удалось", isPresented: Binding(
+            get: { appState.bookmarkSync.errorMessage != nil },
+            set: { if !$0 { appState.bookmarkSync.errorMessage = nil } }
+        ), actions: {
+            Button("OK") { appState.bookmarkSync.errorMessage = nil }
+        }, message: {
+            Text(appState.bookmarkSync.errorMessage ?? "")
+        })
+        .onAppear {
+            vm.loadRecentQueries()
+            searchFieldFocused = true
+        }
     }
 
     private var searchField: some View {
@@ -173,9 +220,59 @@ struct SearchView: View {
                 .controlSize(.small)
                 Spacer()
             }
+
+            if !vm.recentQueries.isEmpty {
+                recentQueriesBar
+            }
         }
         .onChange(of: searchScope) { newValue in
             vm.searchAfterDelay(api: appState.api, searchBy: newValue)
+        }
+    }
+
+    private var recentQueriesBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Недавние")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Очистить") {
+                    vm.clearRecentQueries()
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(vm.recentQueries, id: \.self) { query in
+                        Button {
+                            Task { await vm.useRecentQuery(query, api: appState.api, searchBy: searchScope) }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text(query)
+                                    .lineLimit(1)
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.secondary.opacity(0.1))
+                            .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                vm.removeRecentQuery(query)
+                            } label: {
+                                Label("Убрать из недавних", systemImage: "xmark")
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -206,12 +303,31 @@ struct SearchView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
+                HStack(spacing: 10) {
+                    Text("\(vm.results.count) найдено")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Text("по: \(searchScope.title)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.top, 12)
+
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 16)], alignment: .leading, spacing: 20) {
                     ForEach(vm.results) { release in
                         NavigationLink(value: release) {
                             ReleaseCard(release: release)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            ReleaseLibraryContextMenu(
+                                appState: appState,
+                                release: release,
+                                pendingReleaseIds: $pendingReleaseIds
+                            )
+                        }
                         .onAppear {
                             Task { await vm.loadMoreIfNeeded(current: release, api: appState.api) }
                         }
