@@ -175,6 +175,26 @@ struct ReleaseComment: Codable, Identifiable, Hashable {
     }
 }
 
+extension ReleaseComment {
+    func matchesCommentQuery(_ query: String) -> Bool {
+        let needle = query.normalizedLibrarySearchQuery
+        guard !needle.isEmpty else { return true }
+        let values = [
+            message,
+            formattedDate,
+            originTitle,
+            profile?.displayName,
+            release?.displayTitle,
+            collection?.displayTitle,
+            postedAtEpisode.map(String.init)
+        ]
+        let textMatches = values
+            .compactMap { $0?.normalizedLibrarySearchQuery }
+            .contains { $0.contains(needle) }
+        return textMatches || release?.matchesLibraryQuery(query) == true
+    }
+}
+
 struct CommentsResponse: Codable, CodedResponse {
     let code: Int
     let message: String?

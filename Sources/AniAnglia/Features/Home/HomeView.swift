@@ -182,6 +182,16 @@ final class HomeViewModel: ObservableObject {
 struct HomeView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm = HomeViewModel()
+    @State private var weeklyCommentSearchQuery = ""
+    @State private var showsAllWeeklyComments = false
+
+    private var filteredWeeklyComments: [ReleaseComment] {
+        vm.commentsWeek.filter { $0.matchesCommentQuery(weeklyCommentSearchQuery) }
+    }
+
+    private var hasWeeklyCommentSearchQuery: Bool {
+        !weeklyCommentSearchQuery.normalizedLibrarySearchQuery.isEmpty
+    }
 
     var body: some View {
         ScrollView {
@@ -286,13 +296,78 @@ struct HomeView: View {
         }
     }
 
+    @ViewBuilder
     private var commentsSection: some View {
+        let comments = filteredWeeklyComments
+        let visibleComments = showsAllWeeklyComments ? comments : Array(comments.prefix(6))
         VStack(alignment: .leading, spacing: 12) {
-            Text("Комментарии недели")
-                .font(.title3.bold())
-            LazyVStack(alignment: .leading, spacing: 10) {
-                ForEach(Array(vm.commentsWeek.prefix(6))) { comment in
-                    WeeklyCommentRow(comment: comment)
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("Комментарии недели")
+                    .font(.title3.bold())
+                Text("\(comments.count) из \(vm.commentsWeek.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if comments.count > 6 {
+                    Button(showsAllWeeklyComments ? "Свернуть" : "Все") {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showsAllWeeklyComments.toggle()
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Поиск по комментариям, авторам и релизам", text: $weeklyCommentSearchQuery)
+                    .textFieldStyle(.plain)
+                if hasWeeklyCommentSearchQuery {
+                    Button {
+                        weeklyCommentSearchQuery = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Очистить поиск")
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(Color.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            if visibleComments.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Ничего не найдено")
+                        .font(.callout.weight(.semibold))
+                    Text("Попробуй другой текст, автора или название релиза.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            } else {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(visibleComments) { comment in
+                        WeeklyCommentRow(comment: comment)
+                    }
+                }
+
+                if !showsAllWeeklyComments && comments.count > visibleComments.count {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showsAllWeeklyComments = true
+                        }
+                    } label: {
+                        Label("Показать ещё \(comments.count - visibleComments.count)", systemImage: "chevron.down.circle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
                 }
             }
         }

@@ -4,7 +4,7 @@ Native macOS client for the Anixart anime catalog. The app is SwiftUI-first, tar
 
 ## Features
 
-- Home screen with "Рекомендации", "Обсуждают", "Сейчас смотрят", "Коллекции недели", and "Комментарии недели" sections, plus manual pagination for long home rails.
+- Home screen with "Рекомендации", "Обсуждают", "Сейчас смотрят", "Коллекции недели", and searchable/expandable "Комментарии недели" sections, plus manual pagination for long home rails.
 - Debounced search with automatic pagination and Anixart search scopes: title, studio, director, author, and genre.
 - Release detail page with clickable zoomable poster, title-adjacent genre chips, structured metadata, readable description, searchable/filterable episodes, in-player previous/next episode controls, zoomable screenshots, high-confidence chronological related-release suggestions, searchable/sortable related collections, searchable video blocks, comments with expandable replies, clickable comment authors, own-comment editing/deletion, and bookmark actions.
 - Public collections browser with search, Anixart sort modes, collection detail pages, searchable release lists, clickable collection authors, and account-synced favorite collections.
