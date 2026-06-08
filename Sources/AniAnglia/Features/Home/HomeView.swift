@@ -4,6 +4,7 @@ import SwiftUI
 final class HomeViewModel: ObservableObject {
     @Published var watching: [Release] = []
     @Published var recommendations: [Release] = []
+    @Published var continueWatching: [Release] = []
     @Published var discussing: [Release] = []
     @Published var commentsWeek: [ReleaseComment] = []
     @Published var weekCollections: [AnixartCollection] = []
@@ -81,8 +82,14 @@ final class HomeViewModel: ObservableObject {
                 recommendations = []
                 recommendationsReachedEnd = true
             }
+            if let historyResponse = try? await api.watchHistory(page: 0) {
+                self.continueWatching = deduplicated(historyResponse.items)
+            } else {
+                self.continueWatching = []
+            }
         } else {
             self.recommendations = []
+            self.continueWatching = []
             recommendationsReachedEnd = true
         }
         isLoading = false
@@ -206,6 +213,9 @@ struct HomeView: View {
                         Task { await vm.load(api: appState.api) }
                     }
                 } else {
+                    if !vm.continueWatching.isEmpty {
+                        continueWatchingSection
+                    }
                     if !vm.recommendations.isEmpty {
                         section(
                             title: "Рекомендации",
@@ -290,6 +300,34 @@ struct HomeView: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(isLoadingMore)
+                    }
+                }
+            }
+        }
+    }
+
+    private var continueWatchingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Продолжить просмотр")
+                    .font(.title3.bold())
+                Text("\(vm.continueWatching.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Вся история") {
+                    appState.selectedSidebar = .history
+                }
+                .buttonStyle(.borderless)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 16) {
+                    ForEach(vm.continueWatching) { release in
+                        NavigationLink(value: release) {
+                            ReleaseCard(release: release)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }

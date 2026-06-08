@@ -1,5 +1,30 @@
 import Foundation
 
+struct BookmarkLibraryCounts: Equatable {
+    let favoriteReleases: Int
+    let favoriteCollections: Int
+    let lists: [BookmarkCategory: Int]
+
+    var totalListedReleases: Int {
+        lists.values.reduce(0, +)
+    }
+
+    var totalAccountItems: Int {
+        favoriteReleases + favoriteCollections + totalListedReleases
+    }
+
+    func count(for section: AccountLibrarySection) -> Int {
+        switch section {
+        case .favorites:
+            return favoriteReleases
+        case .favoriteCollections:
+            return favoriteCollections
+        case .list(let category):
+            return lists[category] ?? 0
+        }
+    }
+}
+
 @MainActor
 final class BookmarkSyncStore: ObservableObject {
     @Published private(set) var releasesByCategory: [BookmarkCategory: [Release]] = [:]
@@ -38,6 +63,26 @@ final class BookmarkSyncStore: ObservableObject {
 
     var favoriteCollectionsCount: Int {
         favoriteCollections.count
+    }
+
+    var libraryCounts: BookmarkLibraryCounts {
+        BookmarkLibraryCounts(
+            favoriteReleases: favoriteReleases.count,
+            favoriteCollections: favoriteCollections.count,
+            lists: Dictionary(uniqueKeysWithValues: BookmarkCategory.displayOrder.map { category in
+                (category, count(for: category))
+            })
+        )
+    }
+
+    func category(for releaseId: Int64) -> BookmarkCategory? {
+        BookmarkCategory.displayOrder.first { category in
+            releases(for: category).contains { $0.id == releaseId }
+        }
+    }
+
+    func isFavorite(releaseId: Int64) -> Bool {
+        favoriteReleases.contains { $0.id == releaseId }
     }
 
     func clear() {

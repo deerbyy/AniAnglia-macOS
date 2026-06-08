@@ -63,6 +63,28 @@ enum HistoryLibraryFilter: Hashable, Identifiable {
     }
 }
 
+enum HistorySort: String, CaseIterable, Identifiable, Hashable {
+    case recent
+    case oldest
+    case yearDescending
+    case yearAscending
+    case titleAscending
+    case titleDescending
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .recent: return "Недавние"
+        case .oldest: return "Старые"
+        case .yearDescending: return "Год ↓"
+        case .yearAscending: return "Год ↑"
+        case .titleAscending: return "Название А-Я"
+        case .titleDescending: return "Название Я-А"
+        }
+    }
+}
+
 @MainActor
 final class HistoryViewModel: ObservableObject {
     @Published var releases: [Release] = []
@@ -73,6 +95,7 @@ final class HistoryViewModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var searchQuery = ""
     @Published var libraryFilter: HistoryLibraryFilter = .all
+    @Published var sort: HistorySort = .recent
 
     var searchedReleases: [Release] {
         releases.filter { $0.matchesLibraryQuery(searchQuery) }
@@ -87,7 +110,7 @@ final class HistoryViewModel: ObservableObject {
     }
 
     func visibleReleases(syncStore: BookmarkSyncStore) -> [Release] {
-        searchedReleases.filter { libraryFilter.includes($0, syncStore: syncStore) }
+        sorted(searchedReleases.filter { libraryFilter.includes($0, syncStore: syncStore) })
     }
 
     func reload(api: AnixartAPI) async {
@@ -137,11 +160,56 @@ final class HistoryViewModel: ObservableObject {
             seen.insert(release.id).inserted
         }
     }
+
+    private func sorted(_ releases: [Release]) -> [Release] {
+        switch sort {
+        case .recent:
+            return stableSorted(releases, newestFirst: true, date: \.lastViewDate)
+        case .oldest:
+            return stableSorted(releases, newestFirst: false, date: \.lastViewDate)
+        case .yearDescending:
+            return releases.sorted { lhs, rhs in
+                let lhsYear = Int(lhs.year ?? "") ?? Int.min
+                let rhsYear = Int(rhs.year ?? "") ?? Int.min
+                if lhsYear != rhsYear { return lhsYear > rhsYear }
+                return lhs.displayTitle.localizedStandardCompare(rhs.displayTitle) == .orderedAscending
+            }
+        case .yearAscending:
+            return releases.sorted { lhs, rhs in
+                let lhsYear = Int(lhs.year ?? "") ?? Int.max
+                let rhsYear = Int(rhs.year ?? "") ?? Int.max
+                if lhsYear != rhsYear { return lhsYear < rhsYear }
+                return lhs.displayTitle.localizedStandardCompare(rhs.displayTitle) == .orderedAscending
+            }
+        case .titleAscending:
+            return releases.sorted { $0.displayTitle.localizedStandardCompare($1.displayTitle) == .orderedAscending }
+        case .titleDescending:
+            return releases.sorted { $0.displayTitle.localizedStandardCompare($1.displayTitle) == .orderedDescending }
+        }
+    }
+
+    private func stableSorted(_ releases: [Release], newestFirst: Bool, date: KeyPath<Release, Int64?>) -> [Release] {
+        releases.enumerated().sorted { lhs, rhs in
+            let lhsDate = lhs.element[keyPath: date]
+            let rhsDate = rhs.element[keyPath: date]
+            switch (lhsDate, rhsDate) {
+            case let (lhsDate?, rhsDate?) where lhsDate != rhsDate:
+                return newestFirst ? lhsDate > rhsDate : lhsDate < rhsDate
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                return lhs.offset < rhs.offset
+            }
+        }.map(\.element)
+    }
 }
 
 struct HistoryView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm = HistoryViewModel()
+    @State private var pendingReleaseIds: Set<Int64> = []
 
     private let columns = [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 16)]
 
@@ -192,6 +260,9 @@ struct HistoryView: View {
                                 ReleaseCard(release: release)
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                releaseContextMenu(for: release)
+                            }
                             .onAppear {
                                 Task {
                                     await vm.loadMoreIfNeeded(
@@ -209,6 +280,14 @@ struct HistoryView: View {
             .padding(20)
         }
         .navigationTitle("История")
+        .alert("Не удалось", isPresented: Binding(
+            get: { appState.bookmarkSync.errorMessage != nil },
+            set: { if !$0 { appState.bookmarkSync.errorMessage = nil } }
+        ), actions: {
+            Button("OK") { appState.bookmarkSync.errorMessage = nil }
+        }, message: {
+            Text(appState.bookmarkSync.errorMessage ?? "")
+        })
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 Button {
@@ -237,6 +316,13 @@ struct HistoryView: View {
                 Picker("Фильтр истории", selection: $vm.libraryFilter) {
                     ForEach(HistoryLibraryFilter.displayOrder) { filter in
                         Text(filter.title).tag(filter)
+                    }
+                }
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                Picker("Порядок истории", selection: $vm.sort) {
+                    ForEach(HistorySort.allCases) { sort in
+                        Text(sort.title).tag(sort)
                     }
                 }
                 .pickerStyle(.menu)
@@ -302,6 +388,92 @@ struct HistoryView: View {
             }
             .buttonStyle(.bordered)
             .padding(.top, 8)
+        }
+    }
+
+    @ViewBuilder
+    private func releaseContextMenu(for release: Release) -> some View {
+        let currentCategory = currentCategory(for: release)
+        let isFavorite = isFavoriteRelease(release)
+        let isPending = pendingReleaseIds.contains(release.id)
+
+        Menu("Список") {
+            ForEach(BookmarkCategory.displayOrder) { category in
+                Button {
+                    setReleaseStatus(release, category: category)
+                } label: {
+                    Label(category.title, systemImage: currentCategory == category ? "checkmark" : "bookmark")
+                }
+                .disabled(isPending || currentCategory == category)
+            }
+
+            if currentCategory != nil {
+                Divider()
+                Button(role: .destructive) {
+                    setReleaseStatus(release, category: nil)
+                } label: {
+                    Label("Убрать из списка", systemImage: "bookmark.slash")
+                }
+                .disabled(isPending)
+            }
+        }
+
+        Button(role: isFavorite ? .destructive : nil) {
+            setReleaseFavorite(release, isFavorite: !isFavorite)
+        } label: {
+            Label(isFavorite ? "Убрать из избранного" : "В избранное",
+                  systemImage: isFavorite ? "star.slash" : "star")
+        }
+        .disabled(isPending)
+    }
+
+    private func currentCategory(for release: Release) -> BookmarkCategory? {
+        if let rawValue = release.profileListStatus,
+           let category = BookmarkCategory(rawValue: rawValue) {
+            return category
+        }
+        return appState.bookmarkSync.category(for: release.id)
+    }
+
+    private func isFavoriteRelease(_ release: Release) -> Bool {
+        release.isFavorite == true || appState.bookmarkSync.isFavorite(releaseId: release.id)
+    }
+
+    private func releaseForMutation(_ release: Release) -> Release {
+        release
+            .withProfileListStatus(currentCategory(for: release)?.rawValue)
+            .withFavorite(isFavoriteRelease(release))
+    }
+
+    private func setReleaseStatus(_ release: Release, category: BookmarkCategory?) {
+        Task { @MainActor in
+            pendingReleaseIds.insert(release.id)
+            defer { pendingReleaseIds.remove(release.id) }
+            do {
+                try await appState.bookmarkSync.setStatus(
+                    api: appState.api,
+                    release: releaseForMutation(release),
+                    category: category
+                )
+            } catch {
+                appState.bookmarkSync.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func setReleaseFavorite(_ release: Release, isFavorite: Bool) {
+        Task { @MainActor in
+            pendingReleaseIds.insert(release.id)
+            defer { pendingReleaseIds.remove(release.id) }
+            do {
+                try await appState.bookmarkSync.setFavorite(
+                    api: appState.api,
+                    release: releaseForMutation(release),
+                    isFavorite: isFavorite
+                )
+            } catch {
+                appState.bookmarkSync.errorMessage = error.localizedDescription
+            }
         }
     }
 }

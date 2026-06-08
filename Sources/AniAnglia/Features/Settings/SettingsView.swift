@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @EnvironmentObject private var appState: AppState
     @AppStorage("preferredVideoQuality") private var preferredQuality: String = "auto"
     @AppStorage("autoNextEpisode") private var autoNext: Bool = true
 
@@ -22,6 +23,7 @@ struct SettingsView: View {
 
     private var generalTab: some View {
         Form {
+            accountDataSection
             Section("Кэш") {
                 HStack {
                     Button("Очистить кэш изображений") {
@@ -44,6 +46,57 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    @ViewBuilder
+    private var accountDataSection: some View {
+        Section("Данные аккаунта") {
+            if appState.auth.isAuthenticated {
+                let counts = appState.bookmarkSync.libraryCounts
+                HStack {
+                    Button {
+                        Task {
+                            await appState.bookmarkSync.syncAll(api: appState.api, force: true)
+                        }
+                    } label: {
+                        Label("Синхронизировать библиотеку", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(appState.bookmarkSync.isSyncing)
+
+                    if appState.bookmarkSync.isSyncing {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                LabeledContent("Последняя синхронизация") {
+                    Text(lastLibrarySyncText)
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("Избранное") {
+                    Text("\(counts.favoriteReleases)")
+                        .monospacedDigit()
+                }
+                LabeledContent("Коллекции") {
+                    Text("\(counts.favoriteCollections)")
+                        .monospacedDigit()
+                }
+                LabeledContent("В списках") {
+                    Text("\(counts.totalListedReleases)")
+                        .monospacedDigit()
+                }
+            } else {
+                Text("Войди в аккаунт Anixart, чтобы синхронизировать закладки, избранное, коллекции и списки.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var lastLibrarySyncText: String {
+        if let syncedAt = appState.bookmarkSync.lastSyncedAt {
+            return syncedAt.formatted(date: .abbreviated, time: .shortened)
+        }
+        return "Ещё не запускалась"
     }
 
     private var playbackTab: some View {

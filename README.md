@@ -4,18 +4,18 @@ Native macOS client for the Anixart anime catalog. The app is SwiftUI-first, tar
 
 ## Features
 
-- Home screen with "Рекомендации", "Обсуждают", "Сейчас смотрят", "Коллекции недели", and searchable/expandable "Комментарии недели" sections, plus manual pagination for long home rails.
+- Home screen with "Продолжить просмотр", "Рекомендации", "Обсуждают", "Сейчас смотрят", "Коллекции недели", and searchable/expandable "Комментарии недели" sections, plus manual pagination for long home rails.
 - Debounced search with automatic pagination and Anixart search scopes: title, studio, director, author, and genre.
-- Release detail page with clickable zoomable poster, title-adjacent genre chips, structured metadata, readable description, searchable/filterable episodes, in-player previous/next episode controls, zoomable screenshots, high-confidence chronological related-release suggestions, searchable/sortable related collections, searchable video blocks, comments with expandable replies, clickable comment authors, own-comment editing/deletion, and bookmark actions.
+- Release detail page with clickable zoomable poster, title-adjacent genre chips, structured metadata, readable description, account library status, share/copy actions, searchable/filterable episodes, in-player previous/next episode controls, zoomable screenshots, high-confidence chronological related-release suggestions, searchable/sortable related collections, searchable video blocks, comments with expandable replies, clickable comment authors, own-comment editing/deletion, and bookmark actions.
 - Public collections browser with search, Anixart sort modes, collection detail pages, searchable release lists, clickable collection authors, and account-synced favorite collections.
 - Automatic infinite-scroll loading for search, catalog, collections, collection releases, and watch history, with manual "load more" fallback buttons.
 - Episode and trailer playback through `WKWebView` embed players: YouTube is loaded with an explicit Anixart HTTP referrer, while Kodik/Libria iframe pages receive an Anixart origin.
 - Login/password auth with token/profile id stored in local app preferences. CI artifacts are ad-hoc signed, so avoiding Keychain access prevents password dialogs after each newly installed build.
 - Anonymous browsing mode by default.
-- Account-backed bookmark sync for Anixart favorites, favorite collections, and all five watch lists: "Смотрю", "В планах", "Просмотрено", "Отложено", "Брошено"; release lists default to newest-added first, expose Anixart sort modes, and support direct context-menu moves/removal from the bookmarks screen.
-- Local search inside bookmarks and watch history across release titles, metadata, years, genres, and collection titles/descriptions; watch history can also be filtered by favorites, any watch-list status, no-list items, and all five Anixart lists.
+- Account-backed bookmark sync for Anixart favorites, favorite collections, and all five watch lists: "Смотрю", "В планах", "Просмотрено", "Отложено", "Брошено"; release lists default to newest-added first, expose Anixart sort modes, show a count dashboard, and support direct context-menu moves/removal from the bookmarks screen.
+- Local search inside bookmarks and watch history across release titles, metadata, years, genres, and collection titles/descriptions; watch history can also be filtered by favorites, any watch-list status, no-list items, all five Anixart lists, sorted locally, and edited through context-menu library actions.
 - Expanded Anixart account profile mapping: username/avatar, privacy flags, clickable social links, clickable public watch-list counts for other profiles, favorites, watched episodes, comments, collections, videos, searchable/expandable activity previews, searchable/paginated friends screen, searchable friend requests, rating score, and watched time.
-- Profile screen and settings for appearance, data cache, playback defaults, help, and rules.
+- Profile screen and settings for appearance, account library sync, data cache, playback defaults, help, and rules.
 
 ## Screenshots
 

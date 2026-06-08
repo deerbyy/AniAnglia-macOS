@@ -179,6 +179,7 @@ private struct BookmarksContent: View {
             VStack(spacing: 8) {
                 sectionPicker
                 if appState.auth.isAuthenticated {
+                    libraryDashboard
                     searchField
                 }
                 HStack {
@@ -215,6 +216,37 @@ private struct BookmarksContent: View {
         }, message: {
             Text(syncStore.errorMessage ?? "")
         })
+    }
+
+    private var libraryDashboard: some View {
+        let counts = syncStore.libraryCounts
+        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 118), spacing: 8)], spacing: 8) {
+            ForEach(AccountLibrarySection.displayOrder) { item in
+                Button {
+                    section = item
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Image(systemName: libraryIcon(for: item))
+                                .foregroundStyle(section == item ? .white : libraryTint(for: item))
+                            Spacer()
+                            Text("\(counts.count(for: item))")
+                                .font(.headline.monospacedDigit())
+                        }
+                        Text(item.title)
+                            .font(.caption.weight(.medium))
+                            .lineLimit(1)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(section == item ? .white : .primary)
+                    .background(section == item ? Color.accentColor : Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .help("Открыть «\(item.title)»")
+            }
+        }
     }
 
     private var emptySearchState: some View {
@@ -267,6 +299,34 @@ private struct BookmarksContent: View {
             await syncStore.syncFavoriteCollections(api: appState.api, force: force)
         case .list(let category):
             await syncStore.syncCategory(api: appState.api, category: category, sort: sort, force: force)
+        }
+    }
+
+    private func libraryIcon(for section: AccountLibrarySection) -> String {
+        switch section {
+        case .favorites:
+            return "star.fill"
+        case .favoriteCollections:
+            return "rectangle.stack.fill"
+        case .list(let category):
+            switch category {
+            case .watching: return "play.circle.fill"
+            case .planned: return "calendar.badge.clock"
+            case .watched: return "checkmark.circle.fill"
+            case .onHold: return "pause.circle.fill"
+            case .dropped: return "xmark.circle.fill"
+            }
+        }
+    }
+
+    private func libraryTint(for section: AccountLibrarySection) -> Color {
+        switch section {
+        case .favorites:
+            return .yellow
+        case .favoriteCollections:
+            return .purple
+        case .list(let category):
+            return category.color
         }
     }
 
@@ -391,6 +451,18 @@ private struct BookmarksContent: View {
             } catch {
                 syncStore.errorMessage = error.localizedDescription
             }
+        }
+    }
+}
+
+private extension BookmarkCategory {
+    var color: Color {
+        switch self {
+        case .planned: return .yellow
+        case .watching: return .indigo
+        case .watched: return .green
+        case .onHold: return .purple
+        case .dropped: return .red
         }
     }
 }

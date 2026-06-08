@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @MainActor
@@ -514,6 +515,9 @@ struct ReleaseDetailView: View {
                         userRatingRow
                     }
                     actionsRow
+                    if appState.auth.isAuthenticated {
+                        libraryStatusCard(for: release)
+                    }
                 }
                 Spacer()
             }
@@ -564,8 +568,37 @@ struct ReleaseDetailView: View {
 
             bookmarkMenu
             favoriteButton
+            shareMenu
         }
         .padding(.top, 8)
+    }
+
+    private var shareMenu: some View {
+        Menu {
+            Button {
+                copyReleaseTitleAndLink()
+            } label: {
+                Label("Скопировать название и ссылку", systemImage: "doc.on.doc")
+            }
+
+            Button {
+                copyToPasteboard(String(releaseId))
+            } label: {
+                Label("Скопировать ID", systemImage: "number")
+            }
+
+            Button {
+                NSWorkspace.shared.open(releaseWebURL)
+            } label: {
+                Label("Открыть в браузере", systemImage: "safari")
+            }
+        } label: {
+            Label("Поделиться", systemImage: "square.and.arrow.up")
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     private var favoriteButton: some View {
@@ -630,6 +663,52 @@ struct ReleaseDetailView: View {
         .fixedSize()
         .disabled(vm.bookmarkPending || !appState.auth.isAuthenticated)
         .help(appState.auth.isAuthenticated ? "Списки отслеживания" : "Войди в аккаунт во вкладке «Профиль», чтобы добавлять в закладки")
+    }
+
+    private func libraryStatusCard(for release: Release) -> some View {
+        let category = libraryCategory(for: release)
+        let favorite = libraryFavorite(for: release)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "books.vertical")
+                    .foregroundStyle(Color.accentColor)
+                Text("В моей библиотеке")
+                    .font(.headline)
+                Spacer()
+                if appState.bookmarkSync.isSyncing {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            FlowLayout(spacing: 8, rowSpacing: 8) {
+                if favorite {
+                    Tag(text: "Избранное", systemImage: "star.fill", tint: .yellow)
+                }
+                if let category {
+                    Tag(text: category.title, systemImage: "bookmark.fill", tint: category.color)
+                }
+                if !favorite && category == nil {
+                    Tag(text: "Не добавлено", systemImage: "bookmark", tint: .secondary)
+                }
+            }
+
+            HStack(spacing: 10) {
+                Text(librarySyncText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Открыть в закладках") {
+                    openLibrarySection(for: release)
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            }
+        }
+        .frame(maxWidth: 620, alignment: .leading)
+        .padding(12)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private func releaseSummaryGrid(for release: Release) -> some View {
@@ -725,6 +804,51 @@ struct ReleaseDetailView: View {
         default:
             return nil
         }
+    }
+
+    private var releaseWebURL: URL {
+        URL(string: "https://anixart.tv/release/\(releaseId)")!
+    }
+
+    private var librarySyncText: String {
+        if let syncedAt = appState.bookmarkSync.lastSyncedAt {
+            return "Синхронизировано: \(syncedAt.formatted(date: .omitted, time: .shortened))"
+        }
+        return "Синхронизация библиотеки ещё не запускалась"
+    }
+
+    private func libraryCategory(for release: Release) -> BookmarkCategory? {
+        if let category = vm.bookmarkCategory.flatMap(BookmarkCategory.init(rawValue:)) {
+            return category
+        }
+        if let category = appState.bookmarkSync.category(for: release.id) {
+            return category
+        }
+        return release.profileListStatus.flatMap(BookmarkCategory.init(rawValue:))
+    }
+
+    private func libraryFavorite(for release: Release) -> Bool {
+        vm.isFavorite || appState.bookmarkSync.isFavorite(releaseId: release.id) || release.isFavorite == true
+    }
+
+    private func openLibrarySection(for release: Release) {
+        if let category = libraryCategory(for: release) {
+            appState.selectSidebar(.bookmarks, librarySection: .list(category))
+        } else if libraryFavorite(for: release) {
+            appState.selectSidebar(.bookmarks, librarySection: .favorites)
+        } else {
+            appState.selectSidebar(.bookmarks)
+        }
+    }
+
+    private func copyReleaseTitleAndLink() {
+        let title = effectiveRelease?.displayTitle ?? "AniAnglia release #\(releaseId)"
+        copyToPasteboard("\(title)\n\(releaseWebURL.absoluteString)")
+    }
+
+    private func copyToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     private var videosSection: some View {
