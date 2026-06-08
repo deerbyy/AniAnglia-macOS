@@ -1,4 +1,58 @@
+import AppKit
 import SwiftUI
+
+enum CollectionReleaseLibraryFilter: Hashable, Identifiable {
+    case all
+    case favorites
+    case inAnyList
+    case notInLibrary
+    case list(BookmarkCategory)
+
+    var id: String {
+        switch self {
+        case .all: return "all"
+        case .favorites: return "favorites"
+        case .inAnyList: return "in-any-list"
+        case .notInLibrary: return "not-in-library"
+        case .list(let category): return "list-\(category.rawValue)"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .all: return "Все релизы"
+        case .favorites: return "Избранное"
+        case .inAnyList: return "В списках"
+        case .notInLibrary: return "Без списка"
+        case .list(let category): return category.title
+        }
+    }
+
+    static let displayOrder: [CollectionReleaseLibraryFilter] = [
+        .all,
+        .favorites,
+        .inAnyList,
+        .notInLibrary
+    ] + BookmarkCategory.displayOrder.map(CollectionReleaseLibraryFilter.list)
+
+    @MainActor
+    func includes(_ release: Release, syncStore: BookmarkSyncStore) -> Bool {
+        switch self {
+        case .all:
+            return true
+        case .favorites:
+            return release.isFavorite == true || syncStore.isFavorite(releaseId: release.id)
+        case .inAnyList:
+            return release.profileListStatus != nil || syncStore.category(for: release.id) != nil
+        case .notInLibrary:
+            let isFavorite = release.isFavorite == true || syncStore.isFavorite(releaseId: release.id)
+            let isListed = release.profileListStatus != nil || syncStore.category(for: release.id) != nil
+            return !isFavorite && !isListed
+        case .list(let category):
+            return release.profileListStatus == category.rawValue || syncStore.category(for: release.id) == category
+        }
+    }
+}
 
 @MainActor
 final class CollectionDetailViewModel: ObservableObject {
@@ -11,6 +65,7 @@ final class CollectionDetailViewModel: ObservableObject {
     @Published var isFavorite = false
     @Published var favoritePending = false
     @Published var releaseSearchQuery = ""
+    @Published var releaseLibraryFilter: CollectionReleaseLibraryFilter = .all
 
     private var page = 0
     private var totalPageCount: Int?
@@ -22,12 +77,18 @@ final class CollectionDetailViewModel: ObservableObject {
         !isLoading && !isLoadingMore && !reachedEnd
     }
 
-    var filteredReleases: [Release] {
-        releases.filter { $0.matchesLibraryQuery(releaseSearchQuery) }
+    func filteredReleases(syncStore: BookmarkSyncStore) -> [Release] {
+        releases
+            .filter { $0.matchesLibraryQuery(releaseSearchQuery) }
+            .filter { releaseLibraryFilter.includes($0, syncStore: syncStore) }
     }
 
     var hasReleaseSearchQuery: Bool {
         !releaseSearchQuery.normalizedLibrarySearchQuery.isEmpty
+    }
+
+    var isFilteringLibrary: Bool {
+        releaseLibraryFilter != .all
     }
 
     func load(api: AnixartAPI, collectionId: Int64, prefetched: AnixartCollection?, force: Bool = false) async {
@@ -151,6 +212,7 @@ struct CollectionDetailView: View {
 
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm = CollectionDetailViewModel()
+    @State private var pendingReleaseIds: Set<Int64> = []
 
     var body: some View {
         ScrollView {
@@ -175,13 +237,31 @@ struct CollectionDetailView: View {
             await vm.load(api: appState.api, collectionId: collectionId, prefetched: prefetched)
         }
         .alert("Не удалось", isPresented: Binding(
-            get: { vm.errorMessage != nil && vm.collection != nil },
-            set: { if !$0 { vm.errorMessage = nil } }
+            get: { activeErrorMessage != nil },
+            set: {
+                if !$0 {
+                    vm.errorMessage = nil
+                    appState.bookmarkSync.errorMessage = nil
+                }
+            }
         ), actions: {
-            Button("OK") { vm.errorMessage = nil }
+            Button("OK") {
+                vm.errorMessage = nil
+                appState.bookmarkSync.errorMessage = nil
+            }
         }, message: {
-            Text(vm.errorMessage ?? "")
+            Text(activeErrorMessage ?? "")
         })
+    }
+
+    private var activeErrorMessage: String? {
+        if let error = appState.bookmarkSync.errorMessage {
+            return error
+        }
+        if vm.collection != nil {
+            return vm.errorMessage
+        }
+        return nil
     }
 
     private func header(_ collection: AnixartCollection) -> some View {
@@ -226,8 +306,9 @@ struct CollectionDetailView: View {
                 .padding(18)
             }
 
-            HStack {
+            HStack(spacing: 10) {
                 collectionFavoriteButton(collection)
+                shareMenu(for: collection)
                 Spacer()
             }
 
@@ -239,6 +320,8 @@ struct CollectionDetailView: View {
             if let info = vm.info {
                 stats(info)
             }
+
+            accountCoverageSection
         }
     }
 
@@ -277,6 +360,34 @@ struct CollectionDetailView: View {
         .help(appState.auth.isAuthenticated ? "Синхронизировать избранные коллекции Anixart" : "Войди в аккаунт во вкладке «Профиль», чтобы добавлять коллекции")
     }
 
+    private func shareMenu(for collection: AnixartCollection) -> some View {
+        Menu {
+            Button {
+                copyCollectionTitleAndLink(collection)
+            } label: {
+                Label("Скопировать название и ссылку", systemImage: "doc.on.doc")
+            }
+
+            Button {
+                copyToPasteboard(String(collection.id))
+            } label: {
+                Label("Скопировать ID", systemImage: "number")
+            }
+
+            Button {
+                NSWorkspace.shared.open(collectionWebURL)
+            } label: {
+                Label("Открыть в браузере", systemImage: "safari")
+            }
+        } label: {
+            Label("Поделиться", systemImage: "square.and.arrow.up")
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
     private func stats(_ info: CollectionInfo) -> some View {
         HStack(spacing: 10) {
             stat("Смотрю", info.watchingCount)
@@ -301,8 +412,38 @@ struct CollectionDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
+    private var accountCoverageSection: some View {
+        let coverage = accountCoverage
+        return HStack(spacing: 10) {
+            stat("В моей библиотеке", coverage.tracked)
+            stat("Избранное", coverage.favorites)
+            stat("В списках", coverage.listed)
+            stat("Не добавлено", coverage.untracked)
+            if appState.bookmarkSync.isSyncing {
+                ProgressView()
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    private var accountCoverage: (tracked: Int, favorites: Int, listed: Int, untracked: Int) {
+        var tracked = 0
+        var favorites = 0
+        var listed = 0
+        var untracked = 0
+        for release in vm.releases {
+            let isFavorite = release.isFavorite == true || appState.bookmarkSync.isFavorite(releaseId: release.id)
+            let isListed = release.profileListStatus != nil || appState.bookmarkSync.category(for: release.id) != nil
+            if isFavorite || isListed { tracked += 1 }
+            if isFavorite { favorites += 1 }
+            if isListed { listed += 1 }
+            if !isFavorite && !isListed { untracked += 1 }
+        }
+        return (tracked, favorites, listed, untracked)
+    }
+
     private var releasesSection: some View {
-        let visibleReleases = vm.filteredReleases
+        let visibleReleases = vm.filteredReleases(syncStore: appState.bookmarkSync)
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Релизы")
@@ -313,42 +454,65 @@ struct CollectionDetailView: View {
                 Spacer()
             }
 
-            if vm.releases.count > 8 || vm.hasReleaseSearchQuery {
-                collectionReleaseSearchField
+            releaseControls
+
+            if visibleReleases.isEmpty {
+                ContentUnavailable(
+                    systemImage: "magnifyingglass",
+                    title: "Ничего не найдено",
+                    message: "Попробуй изменить поиск, фильтр библиотеки или догрузить коллекцию ниже."
+                )
+                paginationFooter
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 16)], alignment: .leading, spacing: 20) {
+                    ForEach(visibleReleases) { release in
+                        NavigationLink(value: release) {
+                            ReleaseCard(release: release)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            ReleaseLibraryContextMenu(
+                                appState: appState,
+                                release: release,
+                                pendingReleaseIds: $pendingReleaseIds
+                            )
+                        }
+                        .onAppear {
+                            guard !vm.hasReleaseSearchQuery, !vm.isFilteringLibrary else { return }
+                            Task { await vm.loadMoreIfNeeded(current: release, api: appState.api, collectionId: collectionId) }
+                        }
+                    }
+                }
+                paginationFooter
             }
+        }
+    }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 16)], alignment: .leading, spacing: 20) {
-                if visibleReleases.isEmpty {
-                    Text("По этому запросу ничего не найдено.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .frame(width: 160, height: 230)
+    private var releaseControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                if vm.releases.count > 8 || vm.hasReleaseSearchQuery {
+                    collectionReleaseSearchField
                 }
 
-                ForEach(visibleReleases) { release in
-                    NavigationLink(value: release) {
-                        ReleaseCard(release: release)
-                    }
-                    .buttonStyle(.plain)
-                    .onAppear {
-                        guard !vm.hasReleaseSearchQuery else { return }
-                        Task { await vm.loadMoreIfNeeded(current: release, api: appState.api, collectionId: collectionId) }
+                Picker("Фильтр библиотеки", selection: $vm.releaseLibraryFilter) {
+                    ForEach(CollectionReleaseLibraryFilter.displayOrder) { filter in
+                        Text(filter.title).tag(filter)
                     }
                 }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 190)
+                .disabled(!appState.auth.isAuthenticated)
 
-                if vm.isLoadingMore {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(width: 160, height: 230)
-                } else if vm.canLoadMore {
-                    Button {
-                        Task { await vm.loadMore(api: appState.api, collectionId: collectionId) }
-                    } label: {
-                        Label("Загрузить ещё", systemImage: "arrow.down.circle")
+                Spacer()
+
+                if vm.hasReleaseSearchQuery || vm.isFilteringLibrary {
+                    Button("Сбросить") {
+                        vm.releaseSearchQuery = ""
+                        vm.releaseLibraryFilter = .all
                     }
-                    .buttonStyle(.bordered)
-                    .frame(width: 160, height: 230)
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
                 }
             }
         }
@@ -376,5 +540,37 @@ struct CollectionDetailView: View {
         .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .frame(maxWidth: 360, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var paginationFooter: some View {
+        if vm.isLoadingMore {
+            ProgressView()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 8)
+        } else if vm.canLoadMore {
+            Button {
+                Task { await vm.loadMore(api: appState.api, collectionId: collectionId) }
+            } label: {
+                Label("Загрузить ещё", systemImage: "arrow.down.circle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .padding(.top, 8)
+        }
+    }
+
+    private var collectionWebURL: URL {
+        URL(string: "https://anixart.tv/collection/\(collectionId)")!
+    }
+
+    private func copyCollectionTitleAndLink(_ collection: AnixartCollection) {
+        copyToPasteboard("\(collection.title)\n\(collectionWebURL.absoluteString)")
+    }
+
+    private func copyToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 }

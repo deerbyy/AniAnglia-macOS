@@ -16,10 +16,27 @@ enum CollectionsMode: String, CaseIterable, Identifiable {
     }
 }
 
+enum CollectionFavoriteFilter: String, CaseIterable, Identifiable, Hashable {
+    case all
+    case favorites
+    case notFavorites
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "Все"
+        case .favorites: return "Избранные"
+        case .notFavorites: return "Не избранные"
+        }
+    }
+}
+
 @MainActor
 final class CollectionsViewModel: ObservableObject {
     @Published var mode: CollectionsMode = .popular
     @Published var sort: CollectionSort = .yearPopular
+    @Published var favoriteFilter: CollectionFavoriteFilter = .all
     @Published var searchQuery = ""
     @Published var collections: [AnixartCollection] = []
     @Published var isLoading = false
@@ -34,12 +51,27 @@ final class CollectionsViewModel: ObservableObject {
         !isLoading && !isLoadingMore && !reachedEnd
     }
 
-    var filteredCollections: [AnixartCollection] {
-        collections.filter { $0.matchesLibraryQuery(searchQuery) }
+    func filteredCollections(syncStore: BookmarkSyncStore) -> [AnixartCollection] {
+        collections
+            .filter { $0.matchesLibraryQuery(searchQuery) }
+            .filter { collection in
+                switch favoriteFilter {
+                case .all:
+                    return true
+                case .favorites:
+                    return isFavorite(collection, syncStore: syncStore)
+                case .notFavorites:
+                    return !isFavorite(collection, syncStore: syncStore)
+                }
+            }
     }
 
     var hasSearchQuery: Bool {
         !searchQuery.normalizedLibrarySearchQuery.isEmpty
+    }
+
+    var isFilteringFavorites: Bool {
+        favoriteFilter != .all
     }
 
     func load(api: AnixartAPI, reset: Bool = true) async {
@@ -117,11 +149,16 @@ final class CollectionsViewModel: ObservableObject {
             seen.insert(collection.id).inserted
         }
     }
+
+    private func isFavorite(_ collection: AnixartCollection, syncStore: BookmarkSyncStore) -> Bool {
+        collection.isFavorite == true || syncStore.favoriteCollections.contains { $0.id == collection.id }
+    }
 }
 
 struct CollectionsView: View {
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm = CollectionsViewModel()
+    @State private var pendingCollectionIds: Set<Int64> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -129,8 +166,19 @@ struct CollectionsView: View {
             content
         }
         .navigationTitle("Коллекции")
+        .alert("Не удалось", isPresented: Binding(
+            get: { appState.bookmarkSync.errorMessage != nil },
+            set: { if !$0 { appState.bookmarkSync.errorMessage = nil } }
+        ), actions: {
+            Button("OK") { appState.bookmarkSync.errorMessage = nil }
+        }, message: {
+            Text(appState.bookmarkSync.errorMessage ?? "")
+        })
         .task(id: appState.auth.profileId) {
             await vm.load(api: appState.api, reset: true)
+            if appState.auth.isAuthenticated {
+                await appState.bookmarkSync.syncFavoriteCollections(api: appState.api)
+            }
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -169,9 +217,18 @@ struct CollectionsView: View {
                     .pickerStyle(.menu)
                     .frame(maxWidth: 220)
                 }
+
+                Picker("Избранное", selection: $vm.favoriteFilter) {
+                    ForEach(CollectionFavoriteFilter.allCases) { filter in
+                        Text(filter.title).tag(filter)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 180)
+                .disabled(!appState.auth.isAuthenticated)
             }
 
-            if !vm.collections.isEmpty || vm.hasSearchQuery {
+            if !vm.collections.isEmpty || vm.hasSearchQuery || vm.isFilteringFavorites {
                 searchField
             }
 
@@ -180,11 +237,23 @@ struct CollectionsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if !vm.collections.isEmpty {
-                    Text("\(vm.filteredCollections.count)/\(vm.collections.count)")
+                    Text("\(vm.filteredCollections(syncStore: appState.bookmarkSync).count)/\(vm.collections.count)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
+                if vm.hasSearchQuery || vm.isFilteringFavorites {
+                    Button("Сбросить фильтры") {
+                        vm.searchQuery = ""
+                        vm.favoriteFilter = .all
+                    }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                }
                 Spacer()
+                if appState.bookmarkSync.isSyncing {
+                    ProgressView()
+                        .controlSize(.small)
+                }
             }
         }
         .padding(.horizontal)
@@ -219,7 +288,7 @@ struct CollectionsView: View {
             Text("Коллекций пока нет")
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if vm.filteredCollections.isEmpty {
+        } else if vm.filteredCollections(syncStore: appState.bookmarkSync).isEmpty {
             VStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 30))
@@ -247,15 +316,22 @@ struct CollectionsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
-                let visibleCollections = vm.filteredCollections
+                let visibleCollections = vm.filteredCollections(syncStore: appState.bookmarkSync)
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 16)], alignment: .leading, spacing: 22) {
                     ForEach(visibleCollections) { collection in
                         NavigationLink(value: CollectionRoute(collection)) {
                             CollectionCard(collection: collection)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            CollectionFavoriteContextMenu(
+                                appState: appState,
+                                collection: collection,
+                                pendingCollectionIds: $pendingCollectionIds
+                            )
+                        }
                         .onAppear {
-                            guard !vm.hasSearchQuery else { return }
+                            guard !vm.hasSearchQuery, !vm.isFilteringFavorites else { return }
                             Task { await vm.loadMoreIfNeeded(current: collection, api: appState.api) }
                         }
                     }
