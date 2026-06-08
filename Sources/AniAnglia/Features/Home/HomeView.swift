@@ -281,57 +281,25 @@ struct HomeView: View {
         isLoadingMore: Bool = false,
         onLoadMore: (() -> Void)? = nil
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.title3.bold())
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 16) {
-                    ForEach(releases) { release in
-                        NavigationLink(value: release) {
-                            ReleaseCard(release: release)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    if canLoadMore || isLoadingMore {
-                        Button {
-                            onLoadMore?()
-                        } label: {
-                            HomeLoadMoreCard(title: "Показать ещё", isLoading: isLoadingMore, width: 160, height: 230)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isLoadingMore)
-                    }
-                }
-            }
-        }
+        HomeReleaseRail(
+            title: title,
+            releases: releases,
+            canLoadMore: canLoadMore,
+            isLoadingMore: isLoadingMore,
+            onLoadMore: onLoadMore
+        )
     }
 
     private var continueWatchingSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Продолжить просмотр")
-                    .font(.title3.bold())
-                Text("\(vm.continueWatching.count)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Вся история") {
-                    appState.selectedSidebar = .history
-                }
-                .buttonStyle(.borderless)
+        HomeReleaseRail(
+            title: "Продолжить просмотр",
+            releases: vm.continueWatching,
+            showsCount: true,
+            trailingTitle: "Вся история",
+            trailingAction: {
+                appState.selectedSidebar = .history
             }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 16) {
-                    ForEach(vm.continueWatching) { release in
-                        NavigationLink(value: release) {
-                            ReleaseCard(release: release)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
+        )
     }
 
     @ViewBuilder
@@ -412,42 +380,292 @@ struct HomeView: View {
     }
 
     private var collectionsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Коллекции недели")
-                    .font(.title3.bold())
-                Spacer()
-                Button("Все") {
-                    appState.selectedSidebar = .collections
-                }
-                .buttonStyle(.borderless)
+        HomeCollectionRail(
+            title: "Коллекции недели",
+            collections: vm.weekCollections,
+            canLoadMore: vm.canLoadMoreWeekCollections,
+            isLoadingMore: vm.isLoadingMoreWeekCollections,
+            trailingTitle: "Все",
+            trailingAction: {
+                appState.selectedSidebar = .collections
+            },
+            onLoadMore: {
+                Task { await vm.loadMoreWeekCollections(api: appState.api) }
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 16) {
-                    ForEach(vm.weekCollections) { collection in
-                        NavigationLink(value: CollectionRoute(collection)) {
-                            CollectionCard(collection: collection, style: .compact)
-                        }
-                        .buttonStyle(.plain)
-                    }
+        )
+    }
+}
 
-                    if vm.canLoadMoreWeekCollections || vm.isLoadingMoreWeekCollections {
-                        Button {
-                            Task { await vm.loadMoreWeekCollections(api: appState.api) }
-                        } label: {
-                            HomeLoadMoreCard(
-                                title: "Показать ещё",
-                                isLoading: vm.isLoadingMoreWeekCollections,
-                                width: 220,
-                                height: 124
-                            )
+private enum HomeRailTarget: Hashable {
+    case release(Int64)
+    case collection(Int64)
+    case loadMore
+}
+
+private struct HomeReleaseRail: View {
+    let title: String
+    let releases: [Release]
+    var showsCount = false
+    var canLoadMore = false
+    var isLoadingMore = false
+    var trailingTitle: String?
+    var trailingAction: (() -> Void)?
+    var onLoadMore: (() -> Void)?
+
+    @State private var focusedIndex = 0
+
+    private let pageStep = 4
+
+    private var targetCount: Int {
+        releases.count + (showsLoadMore ? 1 : 0)
+    }
+
+    private var showsLoadMore: Bool {
+        canLoadMore || isLoadingMore
+    }
+
+    private var lastIndex: Int {
+        max(targetCount - 1, 0)
+    }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            VStack(alignment: .leading, spacing: 10) {
+                HomeRailHeader(
+                    title: title,
+                    count: showsCount ? releases.count : nil,
+                    trailingTitle: trailingTitle,
+                    trailingAction: trailingAction,
+                    canMoveBackward: focusedIndex > 0,
+                    canMoveForward: focusedIndex < lastIndex,
+                    onStart: { scroll(to: 0, proxy: proxy) },
+                    onPrevious: { scroll(by: -pageStep, proxy: proxy) },
+                    onNext: { scroll(by: pageStep, proxy: proxy) },
+                    onEnd: { scroll(to: lastIndex, proxy: proxy) }
+                )
+
+                ScrollView(.horizontal, showsIndicators: true) {
+                    HStack(alignment: .top, spacing: 16) {
+                        ForEach(releases) { release in
+                            NavigationLink(value: release) {
+                                ReleaseCard(release: release)
+                            }
+                            .buttonStyle(.plain)
+                            .id(HomeRailTarget.release(release.id))
                         }
-                        .buttonStyle(.plain)
-                        .disabled(vm.isLoadingMoreWeekCollections)
+
+                        if showsLoadMore {
+                            Button {
+                                onLoadMore?()
+                            } label: {
+                                HomeLoadMoreCard(
+                                    title: "Показать ещё",
+                                    isLoading: isLoadingMore,
+                                    width: 160,
+                                    height: 230
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isLoadingMore)
+                            .id(HomeRailTarget.loadMore)
+                        }
                     }
+                    .padding(.bottom, 8)
                 }
+            }
+            .onChange(of: targetCount) { _ in
+                focusedIndex = min(focusedIndex, lastIndex)
             }
         }
+    }
+
+    private func scroll(by delta: Int, proxy: ScrollViewProxy) {
+        scroll(to: focusedIndex + delta, proxy: proxy)
+    }
+
+    private func scroll(to index: Int, proxy: ScrollViewProxy) {
+        guard targetCount > 0 else { return }
+        let nextIndex = min(max(index, 0), lastIndex)
+        focusedIndex = nextIndex
+        guard let target = target(at: nextIndex) else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            proxy.scrollTo(target, anchor: .leading)
+        }
+    }
+
+    private func target(at index: Int) -> HomeRailTarget? {
+        guard index >= 0, index < targetCount else { return nil }
+        if index < releases.count {
+            return .release(releases[index].id)
+        }
+        return .loadMore
+    }
+}
+
+private struct HomeCollectionRail: View {
+    let title: String
+    let collections: [AnixartCollection]
+    var canLoadMore = false
+    var isLoadingMore = false
+    var trailingTitle: String?
+    var trailingAction: (() -> Void)?
+    var onLoadMore: (() -> Void)?
+
+    @State private var focusedIndex = 0
+
+    private let pageStep = 3
+
+    private var targetCount: Int {
+        collections.count + (showsLoadMore ? 1 : 0)
+    }
+
+    private var showsLoadMore: Bool {
+        canLoadMore || isLoadingMore
+    }
+
+    private var lastIndex: Int {
+        max(targetCount - 1, 0)
+    }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            VStack(alignment: .leading, spacing: 10) {
+                HomeRailHeader(
+                    title: title,
+                    count: nil,
+                    trailingTitle: trailingTitle,
+                    trailingAction: trailingAction,
+                    canMoveBackward: focusedIndex > 0,
+                    canMoveForward: focusedIndex < lastIndex,
+                    onStart: { scroll(to: 0, proxy: proxy) },
+                    onPrevious: { scroll(by: -pageStep, proxy: proxy) },
+                    onNext: { scroll(by: pageStep, proxy: proxy) },
+                    onEnd: { scroll(to: lastIndex, proxy: proxy) }
+                )
+
+                ScrollView(.horizontal, showsIndicators: true) {
+                    HStack(alignment: .top, spacing: 16) {
+                        ForEach(collections) { collection in
+                            NavigationLink(value: CollectionRoute(collection)) {
+                                CollectionCard(collection: collection, style: .compact)
+                            }
+                            .buttonStyle(.plain)
+                            .id(HomeRailTarget.collection(collection.id))
+                        }
+
+                        if showsLoadMore {
+                            Button {
+                                onLoadMore?()
+                            } label: {
+                                HomeLoadMoreCard(
+                                    title: "Показать ещё",
+                                    isLoading: isLoadingMore,
+                                    width: 220,
+                                    height: 124
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isLoadingMore)
+                            .id(HomeRailTarget.loadMore)
+                        }
+                    }
+                    .padding(.bottom, 8)
+                }
+            }
+            .onChange(of: targetCount) { _ in
+                focusedIndex = min(focusedIndex, lastIndex)
+            }
+        }
+    }
+
+    private func scroll(by delta: Int, proxy: ScrollViewProxy) {
+        scroll(to: focusedIndex + delta, proxy: proxy)
+    }
+
+    private func scroll(to index: Int, proxy: ScrollViewProxy) {
+        guard targetCount > 0 else { return }
+        let nextIndex = min(max(index, 0), lastIndex)
+        focusedIndex = nextIndex
+        guard let target = target(at: nextIndex) else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            proxy.scrollTo(target, anchor: .leading)
+        }
+    }
+
+    private func target(at index: Int) -> HomeRailTarget? {
+        guard index >= 0, index < targetCount else { return nil }
+        if index < collections.count {
+            return .collection(collections[index].id)
+        }
+        return .loadMore
+    }
+}
+
+private struct HomeRailHeader: View {
+    let title: String
+    let count: Int?
+    let trailingTitle: String?
+    let trailingAction: (() -> Void)?
+    let canMoveBackward: Bool
+    let canMoveForward: Bool
+    let onStart: () -> Void
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+    let onEnd: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(title)
+                .font(.title3.bold())
+            if let count {
+                Text("\(count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let trailingTitle, let trailingAction {
+                Button(trailingTitle, action: trailingAction)
+                    .buttonStyle(.borderless)
+            }
+            HomeRailControls(
+                canMoveBackward: canMoveBackward,
+                canMoveForward: canMoveForward,
+                onStart: onStart,
+                onPrevious: onPrevious,
+                onNext: onNext,
+                onEnd: onEnd
+            )
+        }
+    }
+}
+
+private struct HomeRailControls: View {
+    let canMoveBackward: Bool
+    let canMoveForward: Bool
+    let onStart: () -> Void
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+    let onEnd: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            railButton(systemName: "backward.end.fill", help: "В начало", isEnabled: canMoveBackward, action: onStart)
+            railButton(systemName: "chevron.left", help: "Назад", isEnabled: canMoveBackward, action: onPrevious)
+            railButton(systemName: "chevron.right", help: "Вперёд", isEnabled: canMoveForward, action: onNext)
+            railButton(systemName: "forward.end.fill", help: "В конец", isEnabled: canMoveForward, action: onEnd)
+        }
+        .controlSize(.small)
+    }
+
+    private func railButton(systemName: String, help: String, isEnabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 26, height: 24)
+        }
+        .buttonStyle(.bordered)
+        .disabled(!isEnabled)
+        .help(help)
     }
 }
 
