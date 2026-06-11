@@ -17,6 +17,8 @@ struct ContentView: View {
                         HomeView()
                     case .catalog:
                         CatalogView()
+                    case .collections:
+                        CollectionsView()
                     case .search:
                         SearchView()
                     case .bookmarks:
@@ -29,6 +31,18 @@ struct ContentView: View {
                 }
                 .navigationDestination(for: Release.self) { release in
                     ReleaseDetailView(releaseId: release.id, prefetched: release)
+                }
+                .navigationDestination(for: CollectionRoute.self) { route in
+                    CollectionDetailView(collectionId: route.id, prefetched: route.prefetchedCollection)
+                }
+                .navigationDestination(for: ProfileRoute.self) { route in
+                    ProfileView(profileId: route.id, prefetched: route.prefetchedProfile)
+                }
+                .navigationDestination(for: ProfileListRoute.self) { route in
+                    ProfileListView(route: route)
+                }
+                .navigationDestination(for: ProfileFriendsRoute.self) { route in
+                    ProfileFriendsView(route: route)
                 }
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {

@@ -1,19 +1,81 @@
 import SwiftUI
 
+private enum ProfilePreviewSection: Hashable {
+    case votes
+    case history
+    case collections
+    case comments
+    case videos
+}
+
+private struct ProfileActivityContent {
+    let votes: [Release]
+    let history: [Release]
+    let collections: [AnixartCollection]
+    let comments: [ReleaseComment]
+    let videos: [Video]
+
+    var totalCount: Int {
+        votes.count + history.count + collections.count + comments.count + videos.count
+    }
+
+    var isEmpty: Bool {
+        totalCount == 0
+    }
+}
+
 @MainActor
 final class ProfileViewModel: ObservableObject {
     @Published var profile: Profile?
     @Published var login = ""
     @Published var password = ""
     @Published var isWorking = false
+    @Published var profileLoading = false
     @Published var errorMessage: String?
 
-    /// Mapping: bookmark category id -> first page of releases (preview).
+    /// Mapping: bookmark category id -> first synced releases (preview).
     @Published var previews: [Int: [Release]] = [:]
     @Published var previewsLoading = false
+    @Published var friends: [Profile] = []
+    @Published var friendsPage = 0
+    @Published var friendsHasMore = true
+    @Published var friendsLoading = false
+    @Published var friendsError: String?
+    @Published var friendsSearchQuery = ""
+    @Published var friendRequestScope: FriendRequestScope = .incoming
+    @Published var friendRequests: [Profile] = []
+    @Published var friendRequestsPage = 0
+    @Published var friendRequestsHasMore = true
+    @Published var friendRequestsLoading = false
+    @Published var friendRequestsError: String?
+    @Published var friendRequestsSearchQuery = ""
+    @Published var friendActionIds: Set<Int64> = []
+    @Published var friendActionMessage: String?
 
-    func loadCurrentProfile(api: AnixartAPI, auth: AuthStore) async {
-        guard let id = auth.profileId else { return }
+    var filteredFriends: [Profile] {
+        friends.filter { $0.matchesProfileQuery(friendsSearchQuery) }
+    }
+
+    var filteredFriendRequests: [Profile] {
+        friendRequests.filter { $0.matchesProfileQuery(friendRequestsSearchQuery) }
+    }
+
+    var hasFriendsSearchQuery: Bool {
+        !friendsSearchQuery.normalizedLibrarySearchQuery.isEmpty
+    }
+
+    var hasFriendRequestsSearchQuery: Bool {
+        !friendRequestsSearchQuery.normalizedLibrarySearchQuery.isEmpty
+    }
+
+    func setPrefetchedProfile(_ profile: Profile?) {
+        guard self.profile == nil else { return }
+        self.profile = profile
+    }
+
+    func loadProfile(id: Int64, api: AnixartAPI) async {
+        profileLoading = true
+        defer { profileLoading = false }
         do {
             profile = try await api.profile(id: id)
             errorMessage = nil
@@ -22,17 +84,139 @@ final class ProfileViewModel: ObservableObject {
         }
     }
 
-    func loadBookmarkPreviews(api: AnixartAPI) async {
+    func loadCurrentProfile(api: AnixartAPI, auth: AuthStore) async {
+        guard let id = auth.profileId else { return }
+        await loadProfile(id: id, api: api)
+    }
+
+    func loadBookmarkPreviews(api: AnixartAPI, syncStore: BookmarkSyncStore, force: Bool = false) async {
         previewsLoading = true
         defer { previewsLoading = false }
-        for cat in [2, 1, 3, 4, 5] {
-            do {
-                let resp = try await api.bookmarks(category: cat, page: 0)
-                previews[cat] = Array(resp.items.prefix(8))
-            } catch {
-                previews[cat] = []
-            }
+        await syncStore.syncAll(api: api, force: force)
+        for category in BookmarkCategory.displayOrder {
+            previews[category.rawValue] = Array(syncStore.releases(for: category).prefix(8))
         }
+    }
+
+    func loadFriends(api: AnixartAPI, profileId: Int64, reset: Bool = false) async {
+        guard !friendsLoading else { return }
+        if reset {
+            friendsPage = 0
+            friendsHasMore = true
+            friends = []
+        }
+        guard friendsHasMore else { return }
+
+        friendsLoading = true
+        friendsError = nil
+        defer { friendsLoading = false }
+
+        let page = friendsPage
+        do {
+            let resp = try await api.profileFriends(profileId: profileId, page: page)
+            let incoming = resp.items
+            if page == 0 {
+                friends = incoming
+            } else {
+                let known = Set(friends.map(\.id))
+                friends.append(contentsOf: incoming.filter { !known.contains($0.id) })
+            }
+
+            if let totalPages = resp.totalPageCount, totalPages > 0 {
+                friendsHasMore = page + 1 < totalPages
+            } else {
+                friendsHasMore = !incoming.isEmpty
+            }
+            friendsPage = page + 1
+        } catch {
+            friendsError = error.localizedDescription
+        }
+    }
+
+    func loadFriendRequests(api: AnixartAPI, reset: Bool = false) async {
+        guard api.auth.isAuthenticated, !friendRequestsLoading else { return }
+        if reset {
+            friendRequestsPage = 0
+            friendRequestsHasMore = true
+            friendRequests = []
+        }
+        guard friendRequestsHasMore else { return }
+
+        friendRequestsLoading = true
+        friendRequestsError = nil
+        defer { friendRequestsLoading = false }
+
+        let page = friendRequestsPage
+        do {
+            let resp = try await api.friendRequests(scope: friendRequestScope, page: page)
+            let incoming = resp.items
+            if page == 0 {
+                friendRequests = incoming
+            } else {
+                let known = Set(friendRequests.map(\.id))
+                friendRequests.append(contentsOf: incoming.filter { !known.contains($0.id) })
+            }
+            if let totalPages = resp.totalPageCount, totalPages > 0 {
+                friendRequestsHasMore = page + 1 < totalPages
+            } else {
+                friendRequestsHasMore = !incoming.isEmpty
+            }
+            friendRequestsPage = page + 1
+        } catch {
+            friendRequestsError = error.localizedDescription
+        }
+    }
+
+    func setFriendRequestScope(_ scope: FriendRequestScope, api: AnixartAPI) async {
+        guard scope != friendRequestScope else { return }
+        friendRequestScope = scope
+        await loadFriendRequests(api: api, reset: true)
+    }
+
+    func sendFriendRequest(api: AnixartAPI, profile: Profile) async {
+        await performFriendAction(profile: profile) {
+            try await api.sendFriendRequest(profileId: profile.id)
+            friendActionMessage = "Заявка отправлена"
+        }
+    }
+
+    func acceptFriendRequest(api: AnixartAPI, profile: Profile) async {
+        await performFriendAction(profile: profile) {
+            try await api.sendFriendRequest(profileId: profile.id)
+            removeFriendRequestLocally(profile)
+            if let profileId = api.auth.profileId {
+                await loadFriends(api: api, profileId: profileId, reset: true)
+            }
+            friendActionMessage = "Заявка принята"
+        }
+    }
+
+    func removeFriendRequest(api: AnixartAPI, profile: Profile) async {
+        await performFriendAction(profile: profile) {
+            try await api.removeFriendRequest(profileId: profile.id)
+            removeFriendRequestLocally(profile)
+            friendActionMessage = friendRequestScope == .incoming ? "Заявка отклонена" : "Заявка отменена"
+        }
+    }
+
+    func hideFriendRequest(api: AnixartAPI, profile: Profile) async {
+        await performFriendAction(profile: profile) {
+            try await api.hideFriendRequest(profileId: profile.id)
+            removeFriendRequestLocally(profile)
+            friendActionMessage = "Заявка скрыта"
+        }
+    }
+
+    func syncAccount(api: AnixartAPI, auth: AuthStore, syncStore: BookmarkSyncStore) async {
+        guard auth.isAuthenticated else { return }
+        isWorking = true
+        defer { isWorking = false }
+        if let profileId = auth.profileId {
+            await loadProfile(id: profileId, api: api)
+            await loadFriends(api: api, profileId: profileId, reset: true)
+            await loadFriendRequests(api: api, reset: true)
+        }
+        await loadBookmarkPreviews(api: api, syncStore: syncStore, force: true)
     }
 
     func signIn(api: AnixartAPI, auth: AuthStore) async {
@@ -40,7 +224,7 @@ final class ProfileViewModel: ObservableObject {
         defer { isWorking = false }
         do {
             let resp = try await api.signIn(login: login, password: password)
-            guard resp.code == 0, let token = resp.profileToken?.token, let pid = resp.profile?.id else {
+            guard resp.code == 0, let token = resp.profileToken?.token, let pid = resp.profileId ?? resp.profileToken?.id ?? resp.profile?.id else {
                 errorMessage = readableSignInError(code: resp.code, fallback: resp.message)
                 return
             }
@@ -48,6 +232,8 @@ final class ProfileViewModel: ObservableObject {
             profile = resp.profile
             errorMessage = nil
             password = ""
+        } catch let APIError.server(code, message) {
+            errorMessage = readableSignInError(code: code, fallback: message)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -55,65 +241,163 @@ final class ProfileViewModel: ObservableObject {
 
     private func readableSignInError(code: Int, fallback: String?) -> String {
         switch code {
-        case 2: return "Аккаунт не подтверждён по e-mail"
-        case 3: return "Неверный логин или пароль"
+        case 2: return "Неверный логин или пароль"
         case 4: return "Аккаунт заблокирован"
         case 5: return "Включена двухфакторная авторизация — войди через сайт"
-        default: return fallback ?? "Не удалось войти (code=\(code))"
+        default: return fallback ?? "Anixart отклонил вход (code=\(code))"
         }
+    }
+
+    private func performFriendAction(profile: Profile, action: () async throws -> Void) async {
+        guard !friendActionIds.contains(profile.id) else { return }
+        friendActionIds.insert(profile.id)
+        friendRequestsError = nil
+        friendActionMessage = nil
+        defer { friendActionIds.remove(profile.id) }
+        do {
+            try await action()
+        } catch {
+            friendRequestsError = error.localizedDescription
+        }
+    }
+
+    private func removeFriendRequestLocally(_ profile: Profile) {
+        friendRequests.removeAll { $0.id == profile.id }
     }
 }
 
 struct ProfileView: View {
+    let profileId: Int64?
+    let prefetched: Profile?
+
     @EnvironmentObject private var appState: AppState
     @StateObject private var vm = ProfileViewModel()
+    @State private var playingProfileVideo: Video?
+    @State private var expandedPreviewSections: Set<ProfilePreviewSection> = []
+    @State private var activitySearchQuery = ""
 
-    /// (categoryId, title, accent color) — order matches what users expect on iOS.
-    private let categories: [(Int, String, Color)] = [
-        (2, "Смотрю", .indigo),
-        (1, "В планах", .yellow),
-        (3, "Просмотрено", .green),
-        (4, "Отложено", .purple),
-        (5, "Брошено", .red)
-    ]
+    init(profileId: Int64? = nil, prefetched: Profile? = nil) {
+        self.profileId = profileId
+        self.prefetched = prefetched
+    }
 
     var body: some View {
         Group {
-            if appState.auth.isAuthenticated {
-                authenticated
-            } else {
+            if shouldShowSignIn {
                 signInForm
+            } else {
+                profileContent
             }
         }
-        .navigationTitle("Профиль")
-        .task(id: appState.auth.profileId) {
-            await vm.loadCurrentProfile(api: appState.api, auth: appState.auth)
-            if appState.auth.isAuthenticated {
-                await vm.loadBookmarkPreviews(api: appState.api)
+        .navigationTitle(navigationTitle)
+        .task(id: taskID) {
+            expandedPreviewSections = []
+            activitySearchQuery = ""
+            vm.setPrefetchedProfile(prefetched)
+            guard let id = effectiveProfileId else { return }
+            await vm.loadProfile(id: id, api: appState.api)
+            await vm.loadFriends(api: appState.api, profileId: id, reset: true)
+            if isViewingCurrentProfile && appState.auth.isAuthenticated {
+                await vm.loadFriendRequests(api: appState.api, reset: true)
+                await vm.loadBookmarkPreviews(api: appState.api, syncStore: appState.bookmarkSync)
             }
         }
+        .sheet(item: $playingProfileVideo) { video in
+            VideoPlayerSheet(video: video)
+        }
+        .alert("Друзья", isPresented: Binding(
+            get: { vm.friendActionMessage != nil },
+            set: { if !$0 { vm.friendActionMessage = nil } }
+        ), actions: {
+            Button("OK") { vm.friendActionMessage = nil }
+        }, message: {
+            Text(vm.friendActionMessage ?? "")
+        })
     }
 
     @ViewBuilder
-    private var authenticated: some View {
+    private var profileContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                profileHeader
                 if let profile = vm.profile {
+                    profileHeader(for: profile)
+                    rolesSection(for: profile)
                     statsGrid(for: profile)
+                    accountDetails(for: profile)
+                    profileActivitySections(for: profile)
+                } else if vm.profileLoading {
+                    ProgressView("Загружаю профиль...")
+                        .frame(maxWidth: .infinity, minHeight: 260)
+                } else if let error = vm.errorMessage {
+                    unavailableProfileView(
+                        title: "Не удалось загрузить профиль",
+                        systemImage: "exclamationmark.triangle",
+                        description: error
+                    )
+                } else {
+                    unavailableProfileView(
+                        title: "Профиль недоступен",
+                        systemImage: "person.crop.circle.badge.questionmark"
+                    )
                 }
-                Divider()
-                bookmarkSections
+
+                if isViewingCurrentProfile && appState.auth.isAuthenticated {
+                    Divider()
+                    bookmarkSections
+                }
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
+    private var effectiveProfileId: Int64? {
+        profileId ?? appState.auth.profileId ?? prefetched?.id
+    }
+
+    private var isViewingCurrentProfile: Bool {
+        guard let currentId = appState.auth.profileId else { return profileId == nil }
+        return profileId == nil || profileId == currentId
+    }
+
+    private var shouldShowSignIn: Bool {
+        profileId == nil && !appState.auth.isAuthenticated
+    }
+
+    private var taskID: String {
+        let routePart = profileId.map(String.init) ?? "current"
+        let authPart = appState.auth.profileId.map(String.init) ?? "anon"
+        return "\(routePart):\(authPart)"
+    }
+
+    private var navigationTitle: String {
+        if let name = vm.profile?.displayName, !name.isEmpty {
+            return name
+        }
+        return isViewingCurrentProfile ? "Профиль" : "Профиль пользователя"
+    }
+
+    private func unavailableProfileView(title: String, systemImage: String, description: String? = nil) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: systemImage)
+                .font(.system(size: 42))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.headline)
+            if let description {
+                Text(description)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 260)
+    }
+
     @ViewBuilder
-    private var profileHeader: some View {
+    private func profileHeader(for profile: Profile) -> some View {
         HStack(alignment: .top, spacing: 20) {
-            RemoteImage(url: vm.profile?.avatarURL, contentMode: .fill) {
+            RemoteImage(url: profile.avatarURL, contentMode: .fill) {
                 Circle().fill(Color.secondary.opacity(0.2))
             }
             .frame(width: 110, height: 110)
@@ -121,9 +405,24 @@ struct ProfileView: View {
             .overlay(Circle().stroke(Color.secondary.opacity(0.2), lineWidth: 1))
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(vm.profile?.login ?? "—")
+                Text(profile.displayName)
                     .font(.system(size: 26, weight: .bold))
-                if let status = vm.profile?.status, !status.isEmpty {
+                HStack(spacing: 8) {
+                    if profile.isOnline == true {
+                        Label("Онлайн", systemImage: "circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    if profile.isVerified == true {
+                        Label("Верифицирован", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(.blue)
+                    }
+                    if profile.isSponsor == true {
+                        Label("Sponsor", systemImage: "star.circle.fill")
+                            .foregroundStyle(.yellow)
+                    }
+                }
+                .font(.caption)
+                if let status = profile.status, !status.isEmpty {
                     Text(status)
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -137,20 +436,55 @@ struct ProfileView: View {
             }
             Spacer()
             VStack(spacing: 8) {
-                Button {
-                    Task {
-                        await vm.loadCurrentProfile(api: appState.api, auth: appState.auth)
-                        await vm.loadBookmarkPreviews(api: appState.api)
+                if isViewingCurrentProfile && appState.auth.isAuthenticated {
+                    Button {
+                        Task {
+                            await vm.syncAccount(api: appState.api, auth: appState.auth, syncStore: appState.bookmarkSync)
+                        }
+                    } label: {
+                        if vm.isWorking || appState.bookmarkSync.isSyncing {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Синхронизировать", systemImage: "arrow.triangle.2.circlepath")
+                        }
                     }
-                } label: {
-                    Label("Обновить", systemImage: "arrow.clockwise")
-                }
-                Button(role: .destructive) {
-                    appState.auth.signOut()
-                    vm.profile = nil
-                    vm.previews = [:]
-                } label: {
-                    Label("Выйти", systemImage: "rectangle.portrait.and.arrow.right")
+                    .disabled(vm.isWorking || appState.bookmarkSync.isSyncing)
+                    Button(role: .destructive) {
+                        appState.auth.signOut()
+                        appState.bookmarkSync.clear()
+                        vm.profile = nil
+                        vm.previews = [:]
+                        vm.friends = []
+                        vm.friendRequests = []
+                    } label: {
+                        Label("Выйти", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                } else {
+                    if appState.auth.isAuthenticated {
+                        Button {
+                            Task { await vm.sendFriendRequest(api: appState.api, profile: profile) }
+                        } label: {
+                            if vm.friendActionIds.contains(profile.id) {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Добавить в друзья", systemImage: "person.badge.plus")
+                            }
+                        }
+                        .disabled(vm.friendActionIds.contains(profile.id))
+                    }
+                    Button {
+                        Task {
+                            await vm.loadProfile(id: profile.id, api: appState.api)
+                            await vm.loadFriends(api: appState.api, profileId: profile.id, reset: true)
+                        }
+                    } label: {
+                        if vm.profileLoading || vm.friendsLoading {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Обновить", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .disabled(vm.profileLoading || vm.friendsLoading)
                 }
             }
         }
@@ -167,73 +501,710 @@ struct ProfileView: View {
     }
 
     private func statsGrid(for profile: Profile) -> some View {
-        let stats: [(String, Int?, Int)] = [
-            ("Смотрю", profile.watchingReleasesCount, 2),
-            ("В планах", profile.plannedReleasesCount, 1),
-            ("Просмотрено", profile.watchedReleasesCount, 3),
-            ("Отложено", profile.holdOnReleasesCount, 4),
-            ("Брошено", profile.abandonedReleasesCount, 5)
+        let stats: [(BookmarkCategory, Int?)] = [
+            (.watching, profile.watchingReleasesCount),
+            (.planned, profile.plannedReleasesCount),
+            (.watched, profile.watchedReleasesCount),
+            (.onHold, profile.holdOnReleasesCount),
+            (.dropped, profile.abandonedReleasesCount)
         ]
         return HStack(spacing: 12) {
-            ForEach(stats, id: \.2) { (title, value, cat) in
-                Button {
-                    appState.selectSidebar(.bookmarks, bookmarkCategory: cat)
-                } label: {
-                    VStack(spacing: 4) {
-                        Text("\(value ?? 0)")
-                            .font(.title3.bold().monospacedDigit())
-                        Text(title)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            ForEach(stats, id: \.0) { (category, value) in
+                let count = value ?? (isViewingCurrentProfile ? appState.bookmarkSync.count(for: category) : nil)
+                if isViewingCurrentProfile {
+                    Button {
+                        appState.selectSidebar(.bookmarks, bookmarkCategory: category.rawValue)
+                    } label: {
+                        profileListStatTile(title: category.title, value: count)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color.secondary.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .buttonStyle(.plain)
+                    .help("Открыть «\(category.title)»")
+                } else {
+                    NavigationLink(value: ProfileListRoute(profileId: profile.id, profileName: profile.displayName, category: category)) {
+                        profileListStatTile(title: category.title, value: count)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Открыть «\(category.title)» пользователя \(profile.displayName)")
+                }
+            }
+        }
+    }
+
+    private func profileListStatTile(title: String, value: Int?) -> some View {
+        VStack(spacing: 4) {
+            Text(value.map(String.init) ?? "—")
+                .font(.title3.bold().monospacedDigit())
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func accountDetails(for profile: Profile) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if profile.isStatsHidden == true || profile.isCountsHidden == true {
+                Label("Часть статистики скрыта настройками приватности Anixart.", systemImage: "eye.slash")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], alignment: .leading, spacing: 12) {
+                accountMetric("Избранное", profile.favoriteCount ?? currentProfileOnly(appState.bookmarkSync.favoritesCount), "star")
+                accountMetric("Эпизоды", profile.watchedEpisodeCount, "play.rectangle")
+                accountMetric("Комментарии", profile.commentCount, "text.bubble")
+                accountMetric("Коллекции", profile.collectionCount, "rectangle.stack")
+                accountMetric("Избр. коллекции", currentProfileOnly(appState.bookmarkSync.favoriteCollectionsCount), "star.square")
+                accountMetric("Видео", profile.videoCount, "film")
+                NavigationLink(value: ProfileFriendsRoute(profileId: profile.id, profileName: profile.displayName, totalCount: profile.friendCount)) {
+                    accountMetric("Друзья", profile.friendCount, "person.2")
                 }
                 .buttonStyle(.plain)
-                .help("Открыть «\(title)»")
+                .help("Открыть список друзей")
+                accountMetric("Рейтинг", profile.ratingScore, "chart.line.uptrend.xyaxis")
+                if let watchedTime = profile.watchedTimeText {
+                    accountMetric("Время просмотра", watchedTime, "clock")
+                }
+            }
+
+            if !profile.socialLinks.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Соцсети")
+                        .font(.headline)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(profile.socialLinks) { item in
+                                if let url = item.url {
+                                    Link(destination: url) {
+                                        socialLinkChip(item, isClickable: true)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Открыть \(item.title)")
+                                } else {
+                                    socialLinkChip(item, isClickable: false)
+                                        .textSelection(.enabled)
+                                        .help("Ссылка не указана, можно выделить значение")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func socialLinkChip(_ item: ProfileSocialLink, isClickable: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: socialLinkIcon(for: item.kind))
+                .frame(width: 13)
+            Text(item.title)
+                .fontWeight(.semibold)
+            Text(item.value)
+                .foregroundStyle(.secondary)
+            if isClickable {
+                Image(systemName: "arrow.up.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
+        .lineLimit(1)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(isClickable ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.1))
+        .foregroundStyle(isClickable ? Color.accentColor : Color.primary)
+        .clipShape(Capsule())
+    }
+
+    private func socialLinkIcon(for kind: ProfileSocialLink.Kind) -> String {
+        switch kind {
+        case .telegram: "paperplane"
+        case .vk: "person.2.wave.2"
+        case .instagram: "camera"
+        case .discord: "gamecontroller"
+        case .tiktok: "music.note"
+        }
+    }
+
+    private func currentProfileOnly(_ value: Int) -> Int? {
+        isViewingCurrentProfile ? value : nil
+    }
+
+    private func accountMetric(_ title: String, _ value: Int?, _ icon: String) -> some View {
+        accountMetric(title, value.map(String.init), icon)
+    }
+
+    private func accountMetric(_ title: String, _ value: String?, _ icon: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(value ?? "—")
+                    .font(.headline.monospacedDigit())
+                Text(title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private func rolesSection(for profile: Profile) -> some View {
+        if !profile.roles.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(profile.roles) { role in
+                        Text(role.name)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(roleColor(role.color))
+                            .clipShape(Capsule())
+                    }
+                }
+                .padding(.bottom, 2)
             }
         }
     }
 
     @ViewBuilder
-    private var bookmarkSections: some View {
-        ForEach(categories, id: \.0) { (cat, title, color) in
-            let releases = vm.previews[cat] ?? []
-            if !releases.isEmpty || vm.previewsLoading {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Circle().fill(color).frame(width: 10, height: 10)
-                        Text(title).font(.title3.bold())
-                        Spacer()
-                        Button("Все →") {
-                            appState.selectSidebar(.bookmarks, bookmarkCategory: cat)
-                        }
-                        .buttonStyle(.borderless)
+    private func profileActivitySections(for profile: Profile) -> some View {
+        let activity = filteredActivityContent(for: profile)
+        let unfilteredActivityCount = activityContent(for: profile).totalCount
+        let hasActivitySearchQuery = !activitySearchQuery.normalizedLibrarySearchQuery.isEmpty
+        VStack(alignment: .leading, spacing: 18) {
+            watchDynamicsSection(for: profile)
+            if isViewingCurrentProfile && appState.auth.isAuthenticated {
+                friendRequestsSection
+            }
+            friendsSection(for: profile)
+            if unfilteredActivityCount > 0 {
+                activitySearchControls(
+                    visibleCount: activity.totalCount,
+                    totalCount: unfilteredActivityCount
+                )
+            }
+            if hasActivitySearchQuery && activity.isEmpty {
+                unavailableProfileView(
+                    title: "По активности ничего не найдено",
+                    systemImage: "magnifyingglass",
+                    description: "Попробуй другой запрос: название, комментарий, коллекцию, хостинг видео или год."
+                )
+                .frame(minHeight: 180)
+            }
+            releasePreviewSection(section: .votes, title: "Оценки релизов", icon: "star.leadinghalf.filled", releases: activity.votes)
+            releasePreviewSection(section: .history, title: "Просмотрено недавно", icon: "clock.arrow.circlepath", releases: activity.history)
+            collectionsPreviewSection(collections: activity.collections)
+            commentsPreviewSection(comments: activity.comments)
+            videosPreviewSection(videos: activity.videos)
+        }
+    }
+
+    private func activitySearchControls(visibleCount: Int, totalCount: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                profileSearchField(
+                    placeholder: "Поиск по активности профиля",
+                    text: $activitySearchQuery,
+                    clearHelp: "Очистить поиск по активности"
+                )
+                Text("\(visibleCount)/\(totalCount)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Text("Фильтрует оценки, историю, коллекции, комментарии и видео среди уже загруженных данных.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func activityContent(for profile: Profile) -> ProfileActivityContent {
+        ProfileActivityContent(
+            votes: profile.votes,
+            history: profile.history,
+            collections: profile.collectionsPreview,
+            comments: (profile.releaseCommentsPreview + profile.commentsPreview).uniquedById(),
+            videos: profile.releaseVideosPreview
+        )
+    }
+
+    private func filteredActivityContent(for profile: Profile) -> ProfileActivityContent {
+        let content = activityContent(for: profile)
+        let query = activitySearchQuery
+        guard !query.normalizedLibrarySearchQuery.isEmpty else { return content }
+        return ProfileActivityContent(
+            votes: content.votes.filter { $0.matchesLibraryQuery(query) },
+            history: content.history.filter { $0.matchesLibraryQuery(query) },
+            collections: content.collections.filter { $0.matchesLibraryQuery(query) },
+            comments: content.comments.filter { $0.matchesProfileActivityQuery(query) },
+            videos: content.videos.filter { $0.matchesVideoQuery(query) }
+        )
+    }
+
+    @ViewBuilder
+    private var friendRequestsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Заявки в друзья", systemImage: "person.crop.circle.badge.questionmark")
+                    .font(.title3.bold())
+                Spacer()
+                Picker("Тип заявок", selection: Binding(
+                    get: { vm.friendRequestScope },
+                    set: { scope in Task { await vm.setFriendRequestScope(scope, api: appState.api) } }
+                )) {
+                    ForEach(FriendRequestScope.allCases) { scope in
+                        Text(scope.title).tag(scope)
                     }
-                    if releases.isEmpty {
-                        Text("Список пуст")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .padding(.vertical, 8)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+                Button {
+                    Task { await vm.loadFriendRequests(api: appState.api, reset: true) }
+                } label: {
+                    if vm.friendRequestsLoading && vm.friendRequests.isEmpty {
+                        ProgressView().controlSize(.small)
                     } else {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(alignment: .top, spacing: 14) {
-                                ForEach(releases) { release in
-                                    NavigationLink(value: release) {
-                                        ReleaseCard(release: release)
-                                            .frame(width: 160)
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(vm.friendRequestsLoading)
+                .help("Обновить заявки")
+            }
+
+            if !vm.friendRequests.isEmpty || vm.hasFriendRequestsSearchQuery {
+                profileSearchField(
+                    placeholder: "Поиск по заявкам",
+                    text: $vm.friendRequestsSearchQuery,
+                    clearHelp: "Очистить поиск по заявкам"
+                )
+            }
+
+            if let error = vm.friendRequestsError, vm.friendRequests.isEmpty {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            } else if vm.friendRequests.isEmpty && vm.friendRequestsLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else if vm.friendRequests.isEmpty {
+                Text(vm.friendRequestScope == .incoming ? "Входящих заявок нет." : "Исходящих заявок нет.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                let visibleRequests = vm.filteredFriendRequests
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 12) {
+                        if visibleRequests.isEmpty {
+                            Text("По этому запросу ничего не найдено.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 210, height: 146, alignment: .center)
+                        }
+
+                        ForEach(visibleRequests) { profile in
+                            FriendRequestCard(
+                                profile: profile,
+                                scope: vm.friendRequestScope,
+                                isWorking: vm.friendActionIds.contains(profile.id),
+                                onAccept: { Task { await vm.acceptFriendRequest(api: appState.api, profile: profile) } },
+                                onRemove: { Task { await vm.removeFriendRequest(api: appState.api, profile: profile) } },
+                                onHide: { Task { await vm.hideFriendRequest(api: appState.api, profile: profile) } }
+                            )
+                        }
+
+                        if vm.friendRequestsHasMore {
+                            Button {
+                                Task { await vm.loadFriendRequests(api: appState.api) }
+                            } label: {
+                                VStack(spacing: 8) {
+                                    if vm.friendRequestsLoading {
+                                        ProgressView().controlSize(.small)
+                                    } else {
+                                        Image(systemName: "chevron.right.circle")
+                                            .font(.title2)
                                     }
-                                    .buttonStyle(.plain)
+                                    Text("Ещё")
+                                        .font(.caption.weight(.medium))
                                 }
+                                .frame(width: 96, height: 146)
+                                .background(Color.secondary.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
                             }
-                            .padding(.bottom, 4)
+                            .buttonStyle(.plain)
+                            .disabled(vm.friendRequestsLoading)
+                        }
+                    }
+                    .padding(.bottom, 4)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func friendsSection(for profile: Profile) -> some View {
+        let shouldShow = profile.friendCount.map { $0 > 0 } == true
+            || !vm.friends.isEmpty
+            || vm.friendsLoading
+            || vm.friendsError != nil
+        if shouldShow {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("Друзья", systemImage: "person.2")
+                        .font(.title3.bold())
+                    if let count = profile.friendCount {
+                        Text("\(count)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    NavigationLink(value: ProfileFriendsRoute(profileId: profile.id, profileName: profile.displayName, totalCount: profile.friendCount)) {
+                        Label("Все", systemImage: "list.bullet")
+                    }
+                    .buttonStyle(.borderless)
+                    Button {
+                        Task { await vm.loadFriends(api: appState.api, profileId: profile.id, reset: true) }
+                    } label: {
+                        if vm.friendsLoading && vm.friends.isEmpty {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Обновить", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(vm.friendsLoading)
+                }
+
+                if !vm.friends.isEmpty || vm.hasFriendsSearchQuery {
+                    profileSearchField(
+                        placeholder: "Поиск по друзьям",
+                        text: $vm.friendsSearchQuery,
+                        clearHelp: "Очистить поиск по друзьям"
+                    )
+                }
+
+                if let error = vm.friendsError, vm.friends.isEmpty {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else if vm.friends.isEmpty && vm.friendsLoading {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if vm.friends.isEmpty {
+                    Text("Список друзей пуст или скрыт настройками приватности.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    let visibleFriends = vm.filteredFriends
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 12) {
+                            if visibleFriends.isEmpty {
+                                Text("По этому запросу ничего не найдено.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 132, height: 132, alignment: .center)
+                            }
+
+                            ForEach(visibleFriends) { friend in
+                                NavigationLink(value: ProfileRoute(friend)) {
+                                    ProfileFriendCard(profile: friend)
+                                }
+                                .buttonStyle(.plain)
+                            }
+
+                            if vm.friendsHasMore {
+                                Button {
+                                    Task { await vm.loadFriends(api: appState.api, profileId: profile.id) }
+                                } label: {
+                                    VStack(spacing: 8) {
+                                        if vm.friendsLoading {
+                                            ProgressView().controlSize(.small)
+                                        } else {
+                                            Image(systemName: "chevron.right.circle")
+                                                .font(.title2)
+                                        }
+                                        Text("Ещё")
+                                            .font(.caption.weight(.medium))
+                                    }
+                                    .frame(width: 96, height: 112)
+                                    .background(Color.secondary.opacity(0.08))
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(vm.friendsLoading)
+                            }
+                        }
+                        .padding(.bottom, 4)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func watchDynamicsSection(for profile: Profile) -> some View {
+        let dynamics = Array(profile.watchDynamics.suffix(14))
+        if !dynamics.isEmpty {
+            let maxCount = max(dynamics.map(\.watchedCount).max() ?? 1, 1)
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Динамика просмотра", systemImage: "chart.bar")
+                    .font(.title3.bold())
+                HStack(alignment: .bottom, spacing: 8) {
+                    ForEach(dynamics) { item in
+                        VStack(spacing: 6) {
+                            Text("\(item.watchedCount)")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(Color.accentColor.opacity(0.82))
+                                .frame(width: 18, height: CGFloat(max(8, 74 * item.watchedCount / maxCount)))
+                            Text(item.shortDateText)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .frame(width: 34)
+                                .lineLimit(1)
+                        }
+                        .frame(width: 36)
+                    }
+                }
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func releasePreviewSection(section: ProfilePreviewSection, title: String, icon: String, releases: [Release]) -> some View {
+        if !releases.isEmpty {
+            let limit = 10
+            let isExpanded = isPreviewSectionExpanded(section)
+            let visibleReleases = isExpanded ? releases : Array(releases.prefix(limit))
+            VStack(alignment: .leading, spacing: 10) {
+                previewSectionHeader(
+                    section: section,
+                    title: title,
+                    icon: icon,
+                    visibleCount: visibleReleases.count,
+                    totalCount: releases.count,
+                    limit: limit
+                )
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 14) {
+                        ForEach(visibleReleases) { release in
+                            NavigationLink(value: release) {
+                                ReleaseCard(release: release)
+                                    .frame(width: 160)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.bottom, 4)
+                }
+            }
+        }
+    }
+
+    private func profileSearchField(
+        placeholder: String,
+        text: Binding<String>,
+        clearHelp: String
+    ) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.plain)
+            if !text.wrappedValue.isEmpty {
+                Button {
+                    text.wrappedValue = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(clearHelp)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .frame(maxWidth: 360, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func collectionsPreviewSection(collections: [AnixartCollection]) -> some View {
+        if !collections.isEmpty {
+            let limit = 10
+            let isExpanded = isPreviewSectionExpanded(.collections)
+            let visibleCollections = isExpanded ? collections : Array(collections.prefix(limit))
+            VStack(alignment: .leading, spacing: 10) {
+                previewSectionHeader(
+                    section: .collections,
+                    title: "Коллекции профиля",
+                    icon: "rectangle.stack",
+                    visibleCount: visibleCollections.count,
+                    totalCount: collections.count,
+                    limit: limit
+                )
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 14) {
+                        ForEach(visibleCollections) { collection in
+                            NavigationLink(value: CollectionRoute(collection)) {
+                                CollectionCard(collection: collection, style: .compact)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.bottom, 4)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func commentsPreviewSection(comments: [ReleaseComment]) -> some View {
+        if !comments.isEmpty {
+            let limit = 6
+            let isExpanded = isPreviewSectionExpanded(.comments)
+            let visibleComments = isExpanded ? comments : Array(comments.prefix(limit))
+            VStack(alignment: .leading, spacing: 10) {
+                previewSectionHeader(
+                    section: .comments,
+                    title: "Комментарии профиля",
+                    icon: "text.bubble",
+                    visibleCount: visibleComments.count,
+                    totalCount: comments.count,
+                    limit: limit
+                )
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(visibleComments) { comment in
+                        if let release = comment.release {
+                            NavigationLink(value: release) {
+                                ProfileCommentPreviewRow(comment: comment)
+                            }
+                            .buttonStyle(.plain)
+                        } else if let collection = comment.collection {
+                            NavigationLink(value: CollectionRoute(collection)) {
+                                ProfileCommentPreviewRow(comment: comment)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            ProfileCommentPreviewRow(comment: comment)
                         }
                     }
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func videosPreviewSection(videos: [Video]) -> some View {
+        if !videos.isEmpty {
+            let limit = 10
+            let isExpanded = isPreviewSectionExpanded(.videos)
+            let visibleVideos = isExpanded ? videos : Array(videos.prefix(limit))
+            VStack(alignment: .leading, spacing: 10) {
+                previewSectionHeader(
+                    section: .videos,
+                    title: "Видео профиля",
+                    icon: "film",
+                    visibleCount: visibleVideos.count,
+                    totalCount: videos.count,
+                    limit: limit
+                )
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 14) {
+                        ForEach(visibleVideos) { video in
+                            Button {
+                                playingProfileVideo = video
+                            } label: {
+                                ProfileVideoPreviewCard(video: video)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(video.resolvedPlayerURL == nil)
+                            .help(video.resolvedPlayerURL == nil ? "Нет ссылки на плеер" : "Открыть видео")
+                        }
+                    }
+                    .padding(.bottom, 4)
+                }
+            }
+        }
+    }
+
+    private func previewSectionHeader(
+        section: ProfilePreviewSection,
+        title: String,
+        icon: String,
+        visibleCount: Int,
+        totalCount: Int,
+        limit: Int
+    ) -> some View {
+        HStack(spacing: 10) {
+            Label(title, systemImage: icon)
+                .font(.title3.bold())
+            Text("\(visibleCount)/\(totalCount)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            Spacer()
+            if totalCount > limit {
+                Button {
+                    togglePreviewSection(section)
+                } label: {
+                    Label(
+                        isPreviewSectionExpanded(section) ? "Свернуть" : "Показать все",
+                        systemImage: isPreviewSectionExpanded(section) ? "chevron.up" : "chevron.down"
+                    )
+                }
+                .buttonStyle(.borderless)
+                .help(isPreviewSectionExpanded(section) ? "Свернуть секцию" : "Показать все элементы секции")
+            }
+        }
+    }
+
+    private func isPreviewSectionExpanded(_ section: ProfilePreviewSection) -> Bool {
+        expandedPreviewSections.contains(section)
+    }
+
+    private func togglePreviewSection(_ section: ProfilePreviewSection) {
+        if expandedPreviewSections.contains(section) {
+            expandedPreviewSections.remove(section)
+        } else {
+            expandedPreviewSections.insert(section)
+        }
+    }
+
+    private func roleColor(_ hex: String?) -> Color {
+        guard let hex else { return .accentColor }
+        let cleaned = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard cleaned.count == 6, let value = Int(cleaned, radix: 16) else {
+            return .accentColor
+        }
+        let red = Double((value >> 16) & 0xFF) / 255
+        let green = Double((value >> 8) & 0xFF) / 255
+        let blue = Double(value & 0xFF) / 255
+        return Color(red: red, green: green, blue: blue)
+    }
+
+    @ViewBuilder
+    private var bookmarkSections: some View {
+        ProfileBookmarkSections(
+            appState: appState,
+            syncStore: appState.bookmarkSync,
+            isLoading: vm.previewsLoading
+        )
     }
 
     private var signInForm: some View {
@@ -264,7 +1235,12 @@ struct ProfileView: View {
             }
 
             Button {
-                Task { await vm.signIn(api: appState.api, auth: appState.auth) }
+                Task {
+                    await vm.signIn(api: appState.api, auth: appState.auth)
+                    if appState.auth.isAuthenticated {
+                        await vm.syncAccount(api: appState.api, auth: appState.auth, syncStore: appState.bookmarkSync)
+                    }
+                }
             } label: {
                 if vm.isWorking {
                     ProgressView().controlSize(.small)
@@ -285,5 +1261,364 @@ struct ProfileView: View {
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct ProfileCommentPreviewRow: View {
+    let comment: ReleaseComment
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: comment.collection == nil ? "play.rectangle" : "rectangle.stack")
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    if let originTitle = comment.originTitle {
+                        Text(originTitle)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    if !comment.formattedDate.isEmpty {
+                        Text(comment.formattedDate)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    if let score = comment.voteCount {
+                        Label("\(score)", systemImage: "hand.thumbsup")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                Text(comment.isSpoiler == true ? "Спойлер" : comment.message)
+                    .font(.callout)
+                    .foregroundStyle(comment.isSpoiler == true ? .secondary : .primary)
+                    .lineLimit(3)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct ProfileVideoPreviewCard: View {
+    let video: Video
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack {
+                RemoteImage(url: video.thumbnailURL, contentMode: .fill) {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.1))
+                        .overlay(Image(systemName: "film").font(.title).foregroundStyle(.secondary))
+                }
+                .frame(width: 220, height: 124)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 34))
+                    .foregroundStyle(.white.opacity(video.resolvedPlayerURL == nil ? 0.35 : 0.95))
+            }
+            Text(video.title ?? "Без названия")
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(2)
+                .frame(width: 220, alignment: .leading)
+            if let host = video.hosting?.name {
+                Text(host)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(width: 220, alignment: .leading)
+    }
+}
+
+private struct FriendRequestCard: View {
+    let profile: Profile
+    let scope: FriendRequestScope
+    let isWorking: Bool
+    let onAccept: () -> Void
+    let onRemove: () -> Void
+    let onHide: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            NavigationLink(value: ProfileRoute(profile)) {
+                HStack(spacing: 10) {
+                    RemoteImage(url: profile.avatarURL, contentMode: .fill) {
+                        Circle()
+                            .fill(Color.secondary.opacity(0.12))
+                            .overlay(Image(systemName: "person.fill").foregroundStyle(.secondary))
+                    }
+                    .frame(width: 42, height: 42)
+                    .clipShape(Circle())
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(profile.displayName)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                        if profile.isOnline == true {
+                            Text("Онлайн")
+                                .font(.caption2)
+                                .foregroundStyle(.green)
+                        } else if let status = profile.status, !status.isEmpty {
+                            Text(status)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isWorking {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(maxWidth: .infinity, minHeight: 28)
+            } else if scope == .incoming {
+                HStack(spacing: 6) {
+                    Button("Принять", action: onAccept)
+                        .buttonStyle(.borderedProminent)
+                    Menu {
+                        Button(role: .destructive, action: onRemove) {
+                            Label("Отклонить", systemImage: "xmark")
+                        }
+                        Button(action: onHide) {
+                            Label("Скрыть", systemImage: "eye.slash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                }
+                .controlSize(.small)
+            } else {
+                Button(role: .destructive, action: onRemove) {
+                    Label("Отменить", systemImage: "xmark")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .frame(width: 210, height: 146, alignment: .topLeading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct ProfileFriendCard: View {
+    let profile: Profile
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .bottomTrailing) {
+                RemoteImage(url: profile.avatarURL, contentMode: .fill) {
+                    Circle()
+                        .fill(Color.secondary.opacity(0.12))
+                        .overlay(Image(systemName: "person.fill").foregroundStyle(.secondary))
+                }
+                .frame(width: 58, height: 58)
+                .clipShape(Circle())
+
+                if profile.isOnline == true {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 12, height: 12)
+                        .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(profile.displayName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                if profile.isOnline == true {
+                    Text("Онлайн")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                } else if let activity = lastActivityText {
+                    Text(activity)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
+                if let status = profile.status, !status.isEmpty {
+                    Text(status)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .frame(width: 132, height: 132, alignment: .topLeading)
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var lastActivityText: String? {
+        guard let timestamp = profile.lastActivityTime, timestamp > 0 else { return nil }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = Locale(identifier: "ru_RU")
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: Date(timeIntervalSince1970: TimeInterval(timestamp)), relativeTo: Date())
+    }
+}
+
+private extension Array where Element == ReleaseComment {
+    func uniquedById() -> [ReleaseComment] {
+        var seen = Set<Int64>()
+        return filter { seen.insert($0.id).inserted }
+    }
+}
+
+private extension ReleaseComment {
+    func matchesProfileActivityQuery(_ query: String) -> Bool {
+        let needle = query.normalizedLibrarySearchQuery
+        guard !needle.isEmpty else { return true }
+        let values = [
+            message,
+            formattedDate,
+            originTitle,
+            profile?.displayName,
+            release?.displayTitle,
+            collection?.displayTitle,
+            postedAtEpisode.map { "\($0)" }
+        ]
+        let textMatches = values
+            .compactMap { $0?.normalizedLibrarySearchQuery }
+            .contains { $0.contains(needle) }
+        return textMatches || release?.matchesLibraryQuery(query) == true
+    }
+}
+
+private struct ProfileBookmarkSections: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var syncStore: BookmarkSyncStore
+    let isLoading: Bool
+
+    var body: some View {
+        let favorites = Array(syncStore.favoriteReleases.prefix(8))
+        if !favorites.isEmpty || isLoading {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Circle().fill(Color.yellow).frame(width: 10, height: 10)
+                    Text("Избранное").font(.title3.bold())
+                    Spacer()
+                    Button("Все →") {
+                        appState.selectSidebar(.bookmarks)
+                    }
+                    .buttonStyle(.borderless)
+                }
+                if favorites.isEmpty {
+                    Text("Список пуст")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .padding(.vertical, 8)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 14) {
+                            ForEach(favorites) { release in
+                                NavigationLink(value: release) {
+                                    ReleaseCard(release: release)
+                                        .frame(width: 160)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.bottom, 4)
+                    }
+                }
+            }
+        }
+
+        let favoriteCollections = Array(syncStore.favoriteCollections.prefix(8))
+        if !favoriteCollections.isEmpty || isLoading {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Circle().fill(Color.yellow).frame(width: 10, height: 10)
+                    Text("Избранные коллекции").font(.title3.bold())
+                    Spacer()
+                    Button("Все →") {
+                        appState.selectSidebar(.bookmarks, librarySection: .favoriteCollections)
+                    }
+                    .buttonStyle(.borderless)
+                }
+                if favoriteCollections.isEmpty {
+                    Text("Список пуст")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .padding(.vertical, 8)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 14) {
+                            ForEach(favoriteCollections) { collection in
+                                NavigationLink(value: CollectionRoute(collection)) {
+                                    CollectionCard(collection: collection, style: .compact)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.bottom, 4)
+                    }
+                }
+            }
+        }
+
+        ForEach(BookmarkCategory.displayOrder) { category in
+            let releases = Array(syncStore.releases(for: category).prefix(8))
+            if !releases.isEmpty || isLoading {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Circle().fill(category.color).frame(width: 10, height: 10)
+                        Text(category.title).font(.title3.bold())
+                        Spacer()
+                        Button("Все →") {
+                            appState.selectSidebar(.bookmarks, bookmarkCategory: category.rawValue)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                    if releases.isEmpty {
+                        Text("Список пуст")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .padding(.vertical, 8)
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .top, spacing: 14) {
+                                ForEach(releases) { release in
+                                    NavigationLink(value: release) {
+                                        ReleaseCard(release: release)
+                                            .frame(width: 160)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.bottom, 4)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private extension BookmarkCategory {
+    var color: Color {
+        switch self {
+        case .planned: return .yellow
+        case .watching: return .indigo
+        case .watched: return .green
+        case .onHold: return .purple
+        case .dropped: return .red
+        }
     }
 }

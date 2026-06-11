@@ -36,13 +36,28 @@ struct Episode: Codable, Identifiable, Hashable {
 
     var id: String { "\(releaseId)-\(sourceId)-\(position)" }
 
-    /// Resolve playable URL (http→https, // schemeless).
+    /// Resolve playable URL while preserving the server-provided scheme.
     var resolvedURL: URL? {
         guard let raw = url, !raw.isEmpty else { return nil }
         var s = raw
         if s.hasPrefix("//") { s = "https:" + s }
-        if s.hasPrefix("http://") { s = "https://" + s.dropFirst("http://".count) }
         return URL(string: s)
+    }
+
+    func matchesEpisodeQuery(_ query: String) -> Bool {
+        let needle = query.normalizedLibrarySearchQuery
+        guard !needle.isEmpty else { return true }
+        let displayNumber = String(position + 1)
+        let host = resolvedURL?.host
+        return [
+            name,
+            "Серия \(displayNumber)",
+            displayNumber,
+            url,
+            host
+        ]
+        .compactMap { $0?.normalizedLibrarySearchQuery }
+        .contains { $0.contains(needle) }
     }
 }
 

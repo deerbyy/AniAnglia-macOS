@@ -36,7 +36,7 @@ targets:
         NSHumanReadableCopyright: "© deerbyy"
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.deerbyy.AniAnglia
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.deerbyy.AniAngliaMacOS
         MACOSX_DEPLOYMENT_TARGET: "13.0"
         ENABLE_PREVIEWS: "YES"
         SWIFT_EMIT_LOC_STRINGS: "YES"

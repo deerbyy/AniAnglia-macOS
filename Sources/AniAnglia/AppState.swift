@@ -5,6 +5,7 @@ import Combine
 final class AppState: ObservableObject {
     let api: AnixartAPI
     let auth: AuthStore
+    let bookmarkSync: BookmarkSyncStore
     @Published var selectedSidebar: SidebarItem = .home
 
     /// When set, a release should be pushed onto the active navigation stack.
@@ -13,16 +14,20 @@ final class AppState: ObservableObject {
 
     /// Pre-select bookmark category (1..5) the next time `BookmarksView` opens.
     @Published var pendingBookmarkCategory: Int?
+    @Published var pendingLibrarySection: AccountLibrarySection?
 
     init() {
         let auth = AuthStore()
         self.auth = auth
         self.api = AnixartAPI(auth: auth)
+        self.bookmarkSync = BookmarkSyncStore()
     }
 
     /// Switch to a sidebar item, optionally pre-selecting a bookmark category.
-    func selectSidebar(_ item: SidebarItem, bookmarkCategory: Int? = nil) {
-        if item == .bookmarks, let cat = bookmarkCategory {
+    func selectSidebar(_ item: SidebarItem, bookmarkCategory: Int? = nil, librarySection: AccountLibrarySection? = nil) {
+        if item == .bookmarks, let librarySection {
+            pendingLibrarySection = librarySection
+        } else if item == .bookmarks, let cat = bookmarkCategory {
             pendingBookmarkCategory = cat
         }
         selectedSidebar = item
@@ -37,6 +42,7 @@ final class AppState: ObservableObject {
 enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
     case home
     case catalog
+    case collections
     case search
     case bookmarks
     case history
@@ -48,6 +54,7 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .home: return "Главная"
         case .catalog: return "Каталог"
+        case .collections: return "Коллекции"
         case .search: return "Поиск"
         case .bookmarks: return "Закладки"
         case .history: return "История"
@@ -59,6 +66,7 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .home: return "sparkles"
         case .catalog: return "square.grid.2x2"
+        case .collections: return "rectangle.stack"
         case .search: return "magnifyingglass"
         case .bookmarks: return "bookmark"
         case .history: return "clock"

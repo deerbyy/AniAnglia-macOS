@@ -27,6 +27,9 @@ final class LoginSheetViewModel: ObservableObject {
             }
             errorMessage = readableError(for: resp.code, fallback: resp.message)
             return false
+        } catch let APIError.server(code, message) {
+            errorMessage = readableError(for: code, fallback: message)
+            return false
         } catch {
             errorMessage = error.localizedDescription
             return false
@@ -35,11 +38,10 @@ final class LoginSheetViewModel: ObservableObject {
 
     private func readableError(for code: Int, fallback: String?) -> String {
         switch code {
-        case 2: return "Аккаунт не подтверждён по e-mail"
-        case 3: return "Неверный логин или пароль"
+        case 2: return "Неверный логин или пароль"
         case 4: return "Аккаунт заблокирован"
         case 5: return "Включена двухфакторная авторизация — войди через сайт"
-        default: return fallback ?? "Не удалось войти (code=\(code))"
+        default: return fallback ?? "Anixart отклонил вход (code=\(code))"
         }
     }
 }

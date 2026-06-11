@@ -1,47 +1,111 @@
-# AniAnglia for macOS
+# AniAnglia-macOS
 
-Неофициальный нативный клиент [Anixart](https://anixart.tv) для macOS.
+Native macOS client for the Anixart anime catalog. The app is SwiftUI-first, targets macOS 13 Ventura and newer, and uses pure Swift networking through `URLSession` and `Codable`.
 
-## Стек
-- **Swift 5.9 + SwiftUI** (NavigationSplitView, async/await)
-- **Минимум macOS 13 Ventura** (Apple Silicon + Intel)
-- **URLSession + Codable** — прямой доступ к `https://api.anixart.tv` без сторонних библиотек
-- **WKWebView** — встроенные плееры Kodik / Sibnet / VK / YouTube
-- **Keychain** — хранение токена авторизации
+## Features
 
-## Сборка
+- Home screen with "Продолжить просмотр", "Рекомендации", "Обсуждают", "Сейчас смотрят", "Коллекции недели", and searchable/expandable "Комментарии недели" sections, plus manual pagination for long home rails.
+- Debounced search with automatic pagination, persisted recent queries, result counts, context-menu library actions, and Anixart search scopes: title, studio, director, author, and genre.
+- Release detail page with clickable zoomable poster, title-adjacent genre chips, structured metadata, readable description, account library status, share/copy actions, searchable/filterable episodes, in-player previous/next episode controls, zoomable screenshots, high-confidence chronological related-release suggestions, searchable/sortable related collections, searchable video blocks, comments with expandable replies, clickable comment authors, own-comment editing/deletion, and bookmark actions.
+- Catalog filters with quick presets, active-filter chips, reset/apply controls, result counts, and context-menu library actions; public collections browser with search, Anixart sort modes, favorite-state filtering/actions, collection detail pages with account coverage, searchable/filterable release lists, clickable collection authors, share actions, and account-synced favorite collections.
+- Automatic infinite-scroll loading for search, catalog, collections, collection releases, and watch history, with manual "load more" fallback buttons.
+- Episode and trailer playback through `WKWebView` embed players: YouTube is loaded with an explicit Anixart HTTP referrer, while Kodik/Libria iframe pages receive an Anixart origin.
+- Login/password auth with token/profile id stored in local app preferences. CI artifacts are ad-hoc signed, so avoiding Keychain access prevents password dialogs after each newly installed build.
+- Anonymous browsing mode by default.
+- Account-backed bookmark sync for Anixart favorites, favorite collections, and all five watch lists: "Смотрю", "В планах", "Просмотрено", "Отложено", "Брошено"; release lists default to newest-added first, expose Anixart sort modes, show a count dashboard, and support direct context-menu moves/removal from the bookmarks screen.
+- Local search inside bookmarks and watch history across release titles, metadata, years, genres, and collection titles/descriptions; watch history can also be filtered by favorites, any watch-list status, no-list items, all five Anixart lists, sorted locally, and edited through context-menu library actions.
+- Expanded Anixart account profile mapping: username/avatar, privacy flags, clickable social links, clickable public watch-list counts for other profiles, favorites, watched episodes, comments, collections, videos, searchable/expandable activity previews, searchable/paginated friends screen, searchable friend requests, rating score, and watched time.
+- Profile screen and settings for appearance, account library sync, data cache, playback defaults, help, and rules.
 
-Проект генерируется через [XcodeGen](https://github.com/yonaskolb/XcodeGen) — `AniAnglia.xcodeproj` не закоммичен.
+## Screenshots
+
+Screenshots should be captured from the first full Xcode/CI run and added here with the release artifact. This workspace can compile the Swift sources, but the active developer directory is Command Line Tools rather than full Xcode, so the app cannot be launched locally from `xcodebuild` here.
+
+## API Endpoints Used
+
+- `POST /auth/signIn`
+- `GET /discover/watching/{page}`
+- `GET /discover/recommendations/{page}`
+- `POST /discover/discussing`
+- `POST /discover/comments`
+- `GET /collection/all/{page}`
+- `GET /collection/{collection_id}`
+- `GET /collection/{collection_id}/releases/{page}`
+- `GET /collection/all/release/{release_id}/{page}`
+- `GET /collectionFavorite/all/{page}`
+- `GET /collectionFavorite/add/{collection_id}`
+- `GET /collectionFavorite/delete/{collection_id}`
+- `GET /release/random`
+- `POST /search/releases/{page}`
+- `GET /filter/0`
+- `GET /release/{release_id}`
+- `GET /episode/{release_id}`
+- `GET /episode/{release_id}/{source_id}/{episode_id}`
+- `GET /video/release/{release_id}`
+- `GET /release/comment/all/{release_id}/{page}`
+- `GET /release/comment/replies/{comment_id}/{page}`
+- `POST /release/comment/edit/{comment_id}`
+- `GET /release/comment/delete/{comment_id}`
+- `GET /favorite/all/{page}`
+- `GET /favorite/add/{release_id}`
+- `GET /favorite/delete/{release_id}`
+- `GET /profile/list/add/{list_id}/{release_id}`
+- `GET /profile/list/delete/{list_id}/{release_id}`
+- `GET /profile/list/all/{profile_id}/{list_id}/{page}`
+- `GET /profile/{profile_id}`
+- `GET /profile/friend/all/{profile_id}/{page}`
+- `GET /profile/friend/requests/{type}/{page}`
+- `GET /profile/friend/requests/{type}/last`
+- `GET /profile/friend/request/send/{profile_id}`
+- `GET /profile/friend/request/remove/{profile_id}`
+- `GET /profile/friend/request/hide/{profile_id}`
+
+`POST /search/releases/{page}` uses a JSON body, for example `{"query":"naruto","searchBy":0}`.
+
+All requests use `User-Agent: AnixartApp/9.0 beta-11-25052914 (Android 11; SDK 30; arm64-v8a; samsung; ru_RU)`.
+
+## Build Locally
+
+Install full Xcode, then select it:
 
 ```bash
-brew install xcodegen
-xcodegen generate
-open AniAnglia.xcodeproj
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 ```
 
-## CI / DMG
-GitHub Actions (`.github/workflows/build-dmg.yml`) на каждый push в `main` собирает ad-hoc подписанный `.dmg` и кладёт в артефакты.
+Build and run:
 
-Скачать последнюю сборку: [Actions → Build DMG → AniAnglia-macOS-DMG](https://github.com/deerbyy/AniAnglia-macOS/actions).
+```bash
+./script/build_and_run.sh
+```
 
-## Установка
-- Скачай `.dmg` из артефактов
-- Открой → перетащи `AniAnglia.app` в `/Applications`
-- Первый запуск: ПКМ по иконке → «Открыть» (т.к. подпись ad-hoc, Gatekeeper попросит подтверждение).
+Useful modes:
 
-## Связанные репозитории
-- iOS-версия: [deerbyy/AniAnglia](https://github.com/deerbyy/AniAnglia)
+```bash
+./script/build_and_run.sh --verify
+./script/build_and_run.sh --logs
+./script/build_and_run.sh --debug
+```
 
-## Статус (v0.1)
-- [x] Базовый каркас + сайдбар
-- [x] Главная (лента «Интересное»)
-- [x] Поиск релизов
-- [x] Экран релиза (постер, описание, видео-блоки, скриншоты)
-- [x] Плеер видео в WKWebView
-- [x] Просмотрщик скриншотов с навигацией
-- [x] Авторизация (login + password → Keychain)
-- [x] Закладки (5 категорий)
-- [x] Профиль + статистика
-- [x] Настройки
+SwiftPM can also compile the sources:
 
-Дальше: фильтры каталога, комментарии, история просмотров, эпизоды/серии, экспорт списка.
+```bash
+swift build
+```
+
+Unit tests are XCTest-based and should be run with full Xcode:
+
+```bash
+xcodebuild test -project AniAnglia.xcodeproj -scheme AniAnglia-macOS -destination 'platform=macOS'
+```
+
+## Install From CI Artifact
+
+Download `AniAnglia.dmg` from the GitHub Actions artifact, open it, and drag `AniAnglia.app` to Applications. Because the CI build uses ad-hoc signing, first launch may require `Ctrl` + click on the app, then `Open`.
+
+## Not Included In MVP
+
+- Mini-player window: the code keeps a `PlayerSession` abstraction, but the floating always-on-top window is left for a later release.
+- True automatic next-episode playback: iframe players do not expose a reliable ended event yet, so the Settings flag is reserved and manual previous/next controls are used instead.
+- VK/Google OAuth: first version supports only login/password and anonymous mode.
+- Torrent downloads: intentionally excluded from the macOS MVP.
+- Full DTO coverage for all Anixart endpoints: only fields required by the implemented screens are modeled.

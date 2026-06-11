@@ -27,6 +27,18 @@ struct ReleaseCard: View {
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                         .padding(6)
                 }
+
+            }
+            .overlay(alignment: .topTrailing) {
+                if release.isFavorite == true {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .padding(6)
+                        .foregroundStyle(.yellow)
+                        .background(.black.opacity(0.55))
+                        .clipShape(Circle())
+                        .padding(6)
+                }
             }
             Text(release.displayTitle)
                 .font(.system(size: 12, weight: .medium))
@@ -41,13 +53,20 @@ struct ReleaseCard: View {
     }
 
     private var bookmarkBadge: (title: String, color: Color)? {
-        switch release.profileListStatus {
-        case 1: return ("В планах", .yellow)
-        case 2: return ("Смотрю", .indigo)
-        case 3: return ("Просмотрено", .green)
-        case 4: return ("Отложено", .purple)
-        case 5: return ("Брошено", .red)
-        default: return nil
+        guard let rawValue = release.profileListStatus,
+              let category = BookmarkCategory(rawValue: rawValue) else { return nil }
+        return (category.title, category.color)
+    }
+}
+
+private extension BookmarkCategory {
+    var color: Color {
+        switch self {
+        case .planned: return .yellow
+        case .watching: return .indigo
+        case .watched: return .green
+        case .onHold: return .purple
+        case .dropped: return .red
         }
     }
 }

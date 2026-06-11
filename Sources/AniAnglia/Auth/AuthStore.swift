@@ -1,66 +1,97 @@
 import Foundation
 import Combine
-import Security
+
+struct AuthSession {
+    let token: String
+    let profileId: Int64
+    let profile: Profile?
+}
+
+protocol SessionStorage: AnyObject {
+    func string(for key: String) -> String?
+    func set(_ value: String, for key: String)
+    func delete(_ key: String)
+}
+
+/// Persists the API session without invoking Keychain access dialogs.
+///
+/// CI artifacts are ad-hoc signed, so replacing the app changes its Keychain
+/// identity and causes macOS to prompt on every access to a previous session.
+final class PreferencesSessionStorage: SessionStorage {
+    private let defaults: UserDefaults
+    private let prefix: String
+
+    init(defaults: UserDefaults = .standard, prefix: String = "auth.session.") {
+        self.defaults = defaults
+        self.prefix = prefix
+    }
+
+    func string(for key: String) -> String? {
+        defaults.string(forKey: prefix + key)
+    }
+
+    func set(_ value: String, for key: String) {
+        defaults.set(value, forKey: prefix + key)
+    }
+
+    func delete(_ key: String) {
+        defaults.removeObject(forKey: prefix + key)
+    }
+}
 
 @MainActor
 final class AuthStore: ObservableObject {
-    private let tokenKey = "com.deerbyy.AniAnglia.token"
-    private let profileIdKey = "com.deerbyy.AniAnglia.profileId"
+    private static let tokenKey = "profile_token"
+    private static let profileIdKey = "profile_id"
+    private let storage: SessionStorage
 
     @Published private(set) var token: String?
     @Published private(set) var profileId: Int64?
 
     init() {
-        self.token = Self.keychainString(forKey: tokenKey)
-        if let raw = Self.keychainString(forKey: profileIdKey), let pid = Int64(raw) {
-            self.profileId = pid
-        }
+        self.storage = PreferencesSessionStorage()
+        loadSession()
+    }
+
+    init(storage: SessionStorage) {
+        self.storage = storage
+        loadSession()
     }
 
     var isAuthenticated: Bool { token != nil && profileId != nil }
 
+    var currentSession: AuthSession? {
+        guard let token, let profileId else { return nil }
+        return AuthSession(token: token, profileId: profileId, profile: nil)
+    }
+
+    func save(session: AuthSession) {
+        setCredentials(token: session.token, profileId: session.profileId)
+    }
+
     func setCredentials(token: String, profileId: Int64) {
         self.token = token
         self.profileId = profileId
-        Self.keychainSet(token, forKey: tokenKey)
-        Self.keychainSet(String(profileId), forKey: profileIdKey)
+        storage.set(token, for: Self.tokenKey)
+        storage.set(String(profileId), for: Self.profileIdKey)
     }
 
     func signOut() {
         self.token = nil
         self.profileId = nil
-        Self.keychainDelete(forKey: tokenKey)
-        Self.keychainDelete(forKey: profileIdKey)
+        storage.delete(Self.tokenKey)
+        storage.delete(Self.profileIdKey)
     }
 
-    // MARK: - Keychain helpers
-    private static func keychainQuery(forKey key: String) -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key,
-            kSecAttrService as String: "AniAnglia"
-        ]
-    }
-
-    private static func keychainSet(_ value: String, forKey key: String) {
-        let data = Data(value.utf8)
-        var query = keychainQuery(forKey: key)
-        SecItemDelete(query as CFDictionary)
-        query[kSecValueData as String] = data
-        SecItemAdd(query as CFDictionary, nil)
-    }
-
-    private static func keychainString(forKey key: String) -> String? {
-        var query = keychainQuery(forKey: key)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    private static func keychainDelete(forKey key: String) {
-        SecItemDelete(keychainQuery(forKey: key) as CFDictionary)
+    private func loadSession() {
+        guard let storedToken = storage.string(for: Self.tokenKey),
+              let rawProfileId = storage.string(for: Self.profileIdKey),
+              let storedProfileId = Int64(rawProfileId) else {
+            token = nil
+            profileId = nil
+            return
+        }
+        token = storedToken
+        profileId = storedProfileId
     }
 }
