@@ -206,6 +206,9 @@ struct EpisodesView: View {
         .padding(20)
         .navigationTitle(releaseTitle ?? "Серии")
         .task { await vm.loadTypes(api: appState.api) }
+        .onDisappear {
+            playbackSession = nil
+        }
         .sheet(item: $playbackSession) { session in
             EpisodePlayerSheet(
                 session: session,

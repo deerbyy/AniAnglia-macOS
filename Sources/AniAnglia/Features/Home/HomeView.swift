@@ -11,14 +11,17 @@ final class HomeViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var isLoadingMoreWatching = false
     @Published var isLoadingMoreRecommendations = false
+    @Published var isLoadingMoreDiscussing = false
     @Published var isLoadingMoreWeekCollections = false
     @Published var errorMessage: String?
 
     private var watchingPage = 0
     private var recommendationsPage = 0
+    private var discussingPage = 0
     private var weekCollectionsPage = 0
     private var watchingReachedEnd = false
     private var recommendationsReachedEnd = false
+    private var discussingReachedEnd = false
     private var weekCollectionsReachedEnd = false
 
     var canLoadMoreWatching: Bool {
@@ -29,6 +32,10 @@ final class HomeViewModel: ObservableObject {
         !isLoading && !isLoadingMoreRecommendations && !recommendationsReachedEnd
     }
 
+    var canLoadMoreDiscussing: Bool {
+        !isLoading && !isLoadingMoreDiscussing && !discussingReachedEnd
+    }
+
     var canLoadMoreWeekCollections: Bool {
         !isLoading && !isLoadingMoreWeekCollections && !weekCollectionsReachedEnd
     }
@@ -36,9 +43,11 @@ final class HomeViewModel: ObservableObject {
     func load(api: AnixartAPI) async {
         isLoading = true
         resetPaging()
+        var initialWatchingItems: [Release] = []
         do {
             let watchingResp = try await api.discoverWatching(page: 0)
-            self.watching = watchingResp.items
+            initialWatchingItems = watchingResp.items
+            self.watching = initialWatchingItems
             watchingPage = 1
             watchingReachedEnd = reachedEnd(page: 0, totalPageCount: watchingResp.totalPageCount, incomingIsEmpty: watchingResp.items.isEmpty)
             errorMessage = nil
@@ -47,10 +56,12 @@ final class HomeViewModel: ObservableObject {
             watchingReachedEnd = true
         }
         if let discussingResp = try? await api.discoverDiscussing() {
-            self.discussing = discussingResp.items
+            self.discussing = deduplicated(discussingResp.items + initialWatchingItems)
         } else {
-            self.discussing = []
+            self.discussing = initialWatchingItems
         }
+        discussingPage = 1
+        discussingReachedEnd = watchingReachedEnd
         if let commentsResp = try? await api.discoverCommentsWeek() {
             self.commentsWeek = commentsResp.content
         } else {
@@ -133,6 +144,25 @@ final class HomeViewModel: ObservableObject {
         }
     }
 
+    func loadMoreDiscussing(api: AnixartAPI) async {
+        guard canLoadMoreDiscussing else { return }
+        isLoadingMoreDiscussing = true
+        defer { isLoadingMoreDiscussing = false }
+        do {
+            let page = discussingPage
+            let response = try await api.discoverWatching(page: page)
+            discussing = deduplicated(discussing + response.items)
+            discussingPage = page + 1
+            discussingReachedEnd = reachedEnd(
+                page: page,
+                totalPageCount: response.totalPageCount,
+                incomingIsEmpty: response.items.isEmpty
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func loadMoreWeekCollections(api: AnixartAPI) async {
         guard canLoadMoreWeekCollections else { return }
         isLoadingMoreWeekCollections = true
@@ -155,12 +185,15 @@ final class HomeViewModel: ObservableObject {
     private func resetPaging() {
         watchingPage = 0
         recommendationsPage = 0
+        discussingPage = 0
         weekCollectionsPage = 0
         watchingReachedEnd = false
         recommendationsReachedEnd = false
+        discussingReachedEnd = false
         weekCollectionsReachedEnd = false
         isLoadingMoreWatching = false
         isLoadingMoreRecommendations = false
+        isLoadingMoreDiscussing = false
         isLoadingMoreWeekCollections = false
     }
 
@@ -227,7 +260,14 @@ struct HomeView: View {
                         }
                     }
                     if !vm.discussing.isEmpty {
-                        section(title: "Обсуждают", releases: vm.discussing)
+                        section(
+                            title: "Актуальное обсуждают",
+                            releases: vm.discussing,
+                            canLoadMore: vm.canLoadMoreDiscussing,
+                            isLoadingMore: vm.isLoadingMoreDiscussing
+                        ) {
+                            Task { await vm.loadMoreDiscussing(api: appState.api) }
+                        }
                     }
                     section(
                         title: "Сейчас смотрят",

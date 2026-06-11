@@ -433,6 +433,10 @@ struct ReleaseDetailView: View {
         }
         .navigationTitle(effectiveRelease?.displayTitle ?? "Релиз")
         .task { await vm.load(api: appState.api, releaseId: releaseId) }
+        .onDisappear {
+            playingVideo = nil
+            fullscreenScreenshots = nil
+        }
         .sheet(item: $playingVideo) { video in
             VideoPlayerSheet(video: video)
         }

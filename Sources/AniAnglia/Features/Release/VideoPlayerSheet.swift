@@ -50,6 +50,18 @@ struct WebView: NSViewRepresentable {
 
     private static let safariUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
     private static let embedBaseURL = URL(string: "https://anixart.tv/")!
+    private static let blankHTML = """
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        html, body { margin: 0; width: 100%; height: 100%; background: #000; }
+      </style>
+    </head>
+    <body></body>
+    </html>
+    """
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -82,6 +94,26 @@ struct WebView: NSViewRepresentable {
         case .request(let request):
             webview.load(request)
         }
+    }
+
+    static func dismantleNSView(_ webview: WKWebView, coordinator: Coordinator) {
+        coordinator.currentPageKey = nil
+        webview.evaluateJavaScript("""
+        document.querySelectorAll('video,audio').forEach((node) => {
+          try {
+            node.pause();
+            node.removeAttribute('src');
+            node.load();
+          } catch (_) {}
+        });
+        document.querySelectorAll('iframe').forEach((node) => {
+          try { node.src = 'about:blank'; } catch (_) {}
+        });
+        """)
+        webview.stopLoading()
+        webview.loadHTMLString(Self.blankHTML, baseURL: nil)
+        webview.navigationDelegate = nil
+        webview.uiDelegate = nil
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
