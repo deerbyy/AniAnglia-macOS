@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject private var player = PlayerSettings.shared
+    @AppStorage("endpointUrl") private var endpointUrl: String = "api.anixart.tv"
     @State private var cacheCleared = false
 
     var body: some View {
@@ -26,6 +27,16 @@ struct SettingsView: View {
 
     private var generalTab: some View {
         Form {
+            Section("Сервер (как в AniDesk endpointUrl)") {
+                Picker("API сервер", selection: $endpointUrl) {
+                    ForEach(AniDeskUtils.endpointValues, id: \.value) { item in
+                        Text(item.label).tag(item.value)
+                    }
+                }
+                .help("api-s.anixsekai.com — зеркало, api.anixart.app — основной, api.anixart.tv — заблокирован в РФ")
+                Text("Текущий: https://\(endpointUrl)").font(.caption2).foregroundStyle(.secondary)
+                Text("Смена применяется сразу для новых запросов. Если не грузит — попробуй другое зеркало.").font(.caption2).foregroundStyle(.tertiary)
+            }
             Section("Кэш") {
                 HStack {
                     Button("Очистить кэш изображений") {

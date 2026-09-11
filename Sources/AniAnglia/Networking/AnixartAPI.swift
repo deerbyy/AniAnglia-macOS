@@ -20,7 +20,13 @@ enum APIError: Error, LocalizedError {
 
 @MainActor
 final class AnixartAPI {
-    static let baseURL = URL(string: "https://api.anixart.tv")!
+    // Адаптация AniDesk endpointUrl (api-s.anixsekai.com / api.anixart.app / api.anixart.tv)
+    static var baseURL: URL {
+        let host = UserDefaults.standard.string(forKey: "endpointUrl") ?? "api.anixart.tv"
+        // AniDesk хранит host без https, добавляем схему
+        let normalized = host.hasPrefix("http") ? host : "https://\(host)"
+        return URL(string: normalized) ?? URL(string: "https://api.anixart.tv")!
+    }
     static let userAgent = "AnixartApp/9.0 beta-11-25052914 (Android 11; SDK 30; arm64-v8a; samsung; ru_RU)"
 
     private let session: URLSession
