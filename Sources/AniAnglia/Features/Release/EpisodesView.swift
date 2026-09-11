@@ -23,8 +23,10 @@ final class EpisodesViewModel: ObservableObject {
     }
 
     func toggleWatched(_ episode: Episode, api: AnixartAPI) async {
-        let nextWatched = !isWatched(episode)
-        watchedOverrides[episode.id] = nextWatched
+        let key = episode.id
+        let current = isWatched(episode)
+        let nextWatched = !current
+        watchedOverrides[key] = nextWatched
         do {
             if nextWatched {
                 _ = try await api.markEpisodeWatched(releaseId: episode.releaseId, sourceId: episode.sourceId, position: episode.position)
@@ -33,7 +35,7 @@ final class EpisodesViewModel: ObservableObject {
             }
         } catch {
             // Revert on failure
-            watchedOverrides[episode.id] = !nextWatched
+            watchedOverrides[key] = current
             errorMessage = error.localizedDescription
         }
     }
@@ -45,7 +47,7 @@ final class EpisodesViewModel: ObservableObject {
             let list = try await api.episodeTypes(releaseId: releaseId)
             types = list
             errorMessage = nil
-            // Pick pinned or first
+            // Pick pinned or first; avoid duplicate set inside loadSources
             if let firstPinned = list.first(where: { $0.pinned == true }) ?? list.first {
                 selectedTypeId = firstPinned.id
                 await loadSources(api: api, typeId: firstPinned.id)
@@ -82,6 +84,7 @@ final class EpisodesViewModel: ObservableObject {
         do {
             let list = try await api.episodes(releaseId: releaseId, typeId: typeId, sourceId: sourceId)
             episodes = list.sorted { $0.position < $1.position }
+            errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -118,6 +121,14 @@ struct EpisodesView: View {
                     Task { await vm.toggleWatched(episode, api: appState.api) }
                 }
             })
+        }
+        .alert("Ошибка", isPresented: Binding(
+            get: { vm.errorMessage != nil && vm.types.isEmpty && vm.sources.isEmpty },
+            set: { if !$0 { vm.errorMessage = nil } }
+        )) {
+            Button("OK") { vm.errorMessage = nil }
+        } message: {
+            Text(vm.errorMessage ?? "")
         }
     }
 
@@ -198,7 +209,7 @@ struct EpisodesView: View {
     private var content: some View {
         if vm.isLoadingTypes || vm.isLoadingSources || vm.isLoadingEpisodes {
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let error = vm.errorMessage, vm.episodes.isEmpty {
+        } else if let error = vm.errorMessage, vm.episodes.isEmpty && vm.types.isEmpty {
             ErrorState(message: error) {
                 Task { await vm.loadTypes(api: appState.api) }
             }

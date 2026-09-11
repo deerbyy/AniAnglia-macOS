@@ -115,6 +115,7 @@
 - **Полный экран Профиля (v0.6)**: аватар + логин + статус + дата регистрации + кнопки Обновить/Выйти. Сетка статистики кликабельна. Дальше 5 секций-превью (по всем категориям закладок) — горизонтальный скролл с до 8 карточками плюс кнопка «Все →» переходит на вкладку Закладки с нужной категорией.
 - **Централизованный navigationDestination (v0.6)**: `navigationDestination(for: Release.self)` вынесен на коронь NavigationStack в ContentView — из любого вложенного экрана (в т.ч. из Профиля) можно писать `NavigationLink(value: release)`. Дублирующие `navigationDestination(for: Release.self)` из дочерних вью удалены.
 - **AppState.selectSidebar / openRelease (v0.6)**: новые helpers для навигации между вкладками с опциями (например «открыть Закладки с категорией 'Brosheno'»).
+- **Фикс полноэкранного видео (v0.6.1)**: у WKWebView на macOS HTML5 element fullscreen по умолчанию ВЫКЛЮЧЕН — кнопка «на весь экран» у встроенных плееров (Kodik/Sibnet/VK/YouTube) молча не работала. Исправлено: `config.preferences.isElementFullscreenEnabled = true` в `WebView` (NSViewRepresentable) в `VideoPlayerSheet.swift`. Публичный API с macOS 12.3, таргет 13.0 — доступен без проверки availability. Не удалять эту строку при рефакторинге плеера.
 
 ## Что НЕ сделано (TODO)
 - [ ] Ответы на комментарии (`/release/comment/replies/{id}/{page}`) + редактирование/удаление своих.

@@ -3,24 +3,31 @@ options:
   bundleIdPrefix: com.deerbyy
   deploymentTarget:
     macOS: "13.0"
+  xcodeVersion: "15.0"
+  generateEmptyDirectories: true
   developmentLanguage: ru
 settings:
   base:
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "0.2"
-    CURRENT_PROJECT_VERSION: "1"
+    CURRENT_PROJECT_VERSION: "2"
     DEVELOPMENT_TEAM: ""
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: "-"
     CODE_SIGNING_REQUIRED: "YES"
     CODE_SIGNING_ALLOWED: "YES"
     ENABLE_HARDENED_RUNTIME: "NO"
+    GCC_WARN_UNUSED_VARIABLE: YES
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: NO
 targets:
   AniAnglia:
     type: application
     platform: macOS
+    deploymentTarget: "13.0"
     sources:
       - path: Sources/AniAnglia
+        excludes:
+          - "**/.DS_Store"
     resources:
       - path: Resources/Assets.xcassets
     info:
@@ -30,10 +37,12 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
+        CFBundlePackageType: APPL
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsArbitraryLoadsInWebContent: true
         NSHumanReadableCopyright: "© deerbyy"
+        NSSupportsAutomaticGraphicsSwitching: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.deerbyy.AniAnglia

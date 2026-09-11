@@ -66,8 +66,8 @@ struct ContentView: View {
         .onChange(of: appState.selectedSidebar) { _ in
             navPath = NavigationPath()
         }
-        .onChange(of: appState.pendingRelease) { release in
-            guard let release else { return }
+        .onChange(of: appState.pendingRelease) { newValue in
+            guard let release = newValue else { return }
             navPath.append(release)
             appState.pendingRelease = nil
         }

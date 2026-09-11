@@ -38,29 +38,48 @@ final class AuthStore: ObservableObject {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
-            kSecAttrService as String: "AniAnglia"
+            kSecAttrService as String: "AniAnglia",
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
     }
 
     private static func keychainSet(_ value: String, forKey key: String) {
         let data = Data(value.utf8)
         var query = keychainQuery(forKey: key)
+        // Delete any existing item first to avoid duplicate error
         SecItemDelete(query as CFDictionary)
         query[kSecValueData as String] = data
-        SecItemAdd(query as CFDictionary, nil)
+        query[kSecUseDataProtectionKeychain as String] = true
+        let status = SecItemAdd(query as CFDictionary, nil)
+        if status != errSecSuccess {
+            // Fallback without data protection flag for older macOS
+            query.removeValue(forKey: kSecUseDataProtectionKeychain as String)
+            SecItemAdd(query as CFDictionary, nil)
+        }
     }
 
     private static func keychainString(forKey key: String) -> String? {
         var query = keychainQuery(forKey: key)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
+        query[kSecUseDataProtectionKeychain as String] = true
         var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        var status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status != errSecSuccess {
+            query.removeValue(forKey: kSecUseDataProtectionKeychain as String)
+            status = SecItemCopyMatching(query as CFDictionary, &result)
+        }
         guard status == errSecSuccess, let data = result as? Data else { return nil }
         return String(data: data, encoding: .utf8)
     }
 
     private static func keychainDelete(forKey key: String) {
-        SecItemDelete(keychainQuery(forKey: key) as CFDictionary)
+        var query = keychainQuery(forKey: key)
+        query[kSecUseDataProtectionKeychain as String] = true
+        let status = SecItemDelete(query as CFDictionary)
+        if status != errSecSuccess {
+            query.removeValue(forKey: kSecUseDataProtectionKeychain as String)
+            SecItemDelete(query as CFDictionary)
+        }
     }
 }

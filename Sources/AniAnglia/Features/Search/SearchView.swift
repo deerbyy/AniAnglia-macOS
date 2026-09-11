@@ -14,7 +14,7 @@ final class SearchViewModel: ObservableObject {
         let q = query
         currentTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 300_000_000)
-            if Task.isCancelled { return }
+            guard !Task.isCancelled else { return }
             guard let self else { return }
             await self.performSearch(api: api, query: q)
         }
@@ -34,8 +34,13 @@ final class SearchViewModel: ObservableObject {
             results = resp.items
             errorMessage = nil
         } catch {
+            // Do not clear results on transient error – keep previous list
             errorMessage = error.localizedDescription
         }
+    }
+
+    deinit {
+        currentTask?.cancel()
     }
 }
 
@@ -72,6 +77,7 @@ struct SearchView: View {
                 Button {
                     vm.query = ""
                     vm.results = []
+                    vm.errorMessage = nil
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)

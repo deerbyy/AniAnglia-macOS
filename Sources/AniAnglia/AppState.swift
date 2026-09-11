@@ -14,10 +14,17 @@ final class AppState: ObservableObject {
     /// Pre-select bookmark category (1..5) the next time `BookmarksView` opens.
     @Published var pendingBookmarkCategory: Int?
 
+    private var cancellables = Set<AnyCancellable>()
+
     init() {
         let auth = AuthStore()
         self.auth = auth
         self.api = AnixartAPI(auth: auth)
+
+        // Forward AuthStore changes so views observing AppState update on login/logout.
+        auth.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
     }
 
     /// Switch to a sidebar item, optionally pre-selecting a bookmark category.

@@ -3,19 +3,38 @@ import SwiftUI
 @MainActor
 final class BookmarksViewModel: ObservableObject {
     @Published var releases: [Release] = []
+    @Published var rawReleases: [Release] = [] // оригинал для сортировки
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var category: Int = 2 // Watching by default
+    @Published var sort: Int = 1 // как в AniDesk bookmarkSortValues
 
     func load(api: AnixartAPI) async {
         isLoading = true
         defer { isLoading = false }
         do {
             let resp = try await api.bookmarks(category: category, page: 0)
-            releases = resp.items
+            rawReleases = resp.items
+            applySort()
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+            if (error as? APIError)?.localizedDescription.contains("Не авторизован") == true {
+                rawReleases = []
+                releases = []
+            }
+        }
+    }
+
+    func applySort() {
+        switch sort {
+        case 1: releases = rawReleases // новые — как отдал сервер
+        case 2: releases = rawReleases.reversed() // старые
+        case 3: releases = rawReleases.sorted { (Int($0.year ?? "0") ?? 0) > (Int($1.year ?? "0") ?? 0) }
+        case 4: releases = rawReleases.sorted { (Int($0.year ?? "0") ?? 0) < (Int($1.year ?? "0") ?? 0) }
+        case 5: releases = rawReleases.sorted { $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle) == .orderedAscending }
+        case 6: releases = rawReleases.sorted { $0.displayTitle.localizedCaseInsensitiveCompare($1.displayTitle) == .orderedDescending }
+        default: releases = rawReleases
         }
     }
 }
@@ -40,26 +59,52 @@ struct BookmarksView: View {
             await vm.load(api: appState.api)
         }
         .onAppear {
-            if let pending = appState.pendingBookmarkCategory {
-                vm.category = pending
-                appState.pendingBookmarkCategory = nil
-            }
+            applyPendingCategoryIfNeeded()
         }
         .onChange(of: appState.pendingBookmarkCategory) { newValue in
-            if let pending = newValue {
-                vm.category = pending
-                appState.pendingBookmarkCategory = nil
+            if newValue != nil {
+                applyPendingCategoryIfNeeded()
+            }
+        }
+        // Reload when auth state changes (login/logout) – AppState forwards objectWillChange
+        .task(id: appState.auth.isAuthenticated) {
+            if appState.auth.isAuthenticated {
+                await vm.load(api: appState.api)
+            } else {
+                vm.releases = []
             }
         }
     }
 
+    private func applyPendingCategoryIfNeeded() {
+        if let pending = appState.pendingBookmarkCategory {
+            vm.category = pending
+            appState.pendingBookmarkCategory = nil
+        }
+    }
+
     private var categoryPicker: some View {
-        Picker("", selection: $vm.category) {
-            ForEach(categories, id: \.0) { (id, title) in
-                Text(title).tag(id)
+        VStack(spacing: 8) {
+            Picker("", selection: $vm.category) {
+                ForEach(categories, id: \.0) { (id, title) in
+                    Text(title).tag(id)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            HStack {
+                Picker("Сортировка", selection: $vm.sort) {
+                    ForEach(AniDeskUtils.bookmarkSortValues, id: \.value) { item in
+                        Text(item.label).tag(item.value)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 320)
+                .onChange(of: vm.sort) { _ in vm.applySort() }
+                Spacer()
+                Text("\(vm.releases.count) релизов").font(.caption).foregroundStyle(.secondary)
             }
         }
-        .pickerStyle(.segmented)
     }
 
     @ViewBuilder

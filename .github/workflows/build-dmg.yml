@@ -1,8 +1,11 @@
 name: Build DMG
 
+permissions:
+  contents: write
+
 on:
   push:
-    branches: [ main, "devin/**" ]
+    branches: [ main, "devin/**", "arena/**" ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -12,6 +15,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Select latest Xcode
         run: |
@@ -48,7 +53,63 @@ jobs:
             CODE_SIGNING_ALLOWED=YES \
             ENABLE_HARDENED_RUNTIME=NO \
             DEVELOPMENT_TEAM= \
-            build
+            build 2>&1 | tee build.log
+
+      - name: Show build log
+        if: always()
+        run: |
+          echo "=== Build log tail ==="
+          tail -n 300 build.log || true
+          echo "=== Build log full ==="
+          cat build.log || true
+
+      - name: Annotate failure with log
+        if: failure()
+        run: |
+          echo "Build failed – emitting log as annotations"
+          tail -n 200 build.log | head -n 100 > /tmp/logsnippet.txt
+          while IFS= read -r line; do
+            esc=$(echo "$line" | sed 's/%/%25/g; s/\r/%0D/g; s/\n/%0A/g')
+            echo "::error::$esc"
+          done < /tmp/logsnippet.txt
+          echo "=== Summary ===" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -n 500 build.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Create issue with log on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          echo "Creating issue with build log"
+          gh issue create --title "Build failure $GITHUB_SHA" --body-file build.log --label "bug" 2>&1 | head -n 50 || echo "issue create failed"
+          gh gist create build.log --public --desc "Build log $GITHUB_SHA" 2>&1 | head -n 20 || echo "gist failed"
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Push build log to branch
+        if: failure()
+        run: |
+          set -e
+          echo "Pushing build.log to branch for debugging"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Ensure we have latest remote
+          git fetch origin ${{ github.ref_name }} || true
+          # Save log
+          cp build.log build-failure.log
+          git add -f build-failure.log || true
+          git commit -m "ci: build failure log for ${{ github.sha }}" || echo "no changes to commit"
+          git push origin HEAD:${{ github.ref_name }} || echo "push failed"
 
       - name: Locate .app
         id: locate

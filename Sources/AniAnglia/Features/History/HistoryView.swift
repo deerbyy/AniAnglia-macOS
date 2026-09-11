@@ -10,7 +10,9 @@ final class HistoryViewModel: ObservableObject {
 
     func reload(api: AnixartAPI) async {
         isLoading = true
+        defer { isLoading = false }
         page = 0
+        totalPages = nil
         errorMessage = nil
         do {
             let resp = try await api.watchHistory(page: 0)
@@ -20,27 +22,35 @@ final class HistoryViewModel: ObservableObject {
             errorMessage = error.localizedDescription
             releases = []
         }
-        isLoading = false
     }
 
     func loadMore(api: AnixartAPI) async {
         guard !isLoading, canLoadMore else { return }
         isLoading = true
+        defer { isLoading = false }
         let next = page + 1
         do {
             let resp = try await api.watchHistory(page: next)
+            if resp.items.isEmpty {
+                totalPages = next
+                return
+            }
             releases.append(contentsOf: resp.items)
             page = next
             totalPages = resp.totalPageCount
         } catch {
             errorMessage = error.localizedDescription
         }
-        isLoading = false
     }
 
     var canLoadMore: Bool {
-        guard let total = totalPages else { return false }
-        return page + 1 < total
+        if releases.isEmpty { return false }
+        if let total = totalPages {
+            if total <= 0 { return false }
+            return page + 1 < total
+        }
+        // Unknown total – allow next fetch until server returns empty
+        return true
     }
 }
 
@@ -85,6 +95,7 @@ struct HistoryView: View {
                             .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
+                        .disabled(vm.isLoading)
                         .padding(.top, 8)
                     }
                 }
@@ -105,6 +116,11 @@ struct HistoryView: View {
         .task(id: appState.auth.profileId) {
             if appState.auth.isAuthenticated && vm.releases.isEmpty {
                 await vm.reload(api: appState.api)
+            }
+            if !appState.auth.isAuthenticated {
+                vm.releases = []
+                vm.page = 0
+                vm.totalPages = nil
             }
         }
     }
