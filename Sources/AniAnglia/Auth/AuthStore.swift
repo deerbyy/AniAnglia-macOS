@@ -76,7 +76,7 @@ final class AuthStore: ObservableObject {
     private static func keychainDelete(forKey key: String) {
         var query = keychainQuery(forKey: key)
         query[kSecUseDataProtectionKeychain as String] = true
-        var status = SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(query as CFDictionary)
         if status != errSecSuccess {
             query.removeValue(forKey: kSecUseDataProtectionKeychain as String)
             SecItemDelete(query as CFDictionary)
