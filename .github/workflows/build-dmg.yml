@@ -48,7 +48,26 @@ jobs:
             CODE_SIGNING_ALLOWED=YES \
             ENABLE_HARDENED_RUNTIME=NO \
             DEVELOPMENT_TEAM= \
-            build
+            build 2>&1 | tee build.log
+
+      - name: Show build log
+        if: always()
+        run: |
+          echo "=== Build log tail ==="
+          tail -n 300 build.log || true
+          echo "=== Build log full ==="
+          cat build.log || true
+
+      - name: Push build log on failure
+        if: failure()
+        run: |
+          set -e
+          git config user.email "ci@github.com"
+          git config user.name "CI"
+          cp build.log build-failure.log || echo "no log" > build-failure.log
+          git add build-failure.log || true
+          git commit -m "ci: build failure log" || true
+          git push origin HEAD:${{ github.ref_name }} || true
 
       - name: Locate .app
         id: locate
