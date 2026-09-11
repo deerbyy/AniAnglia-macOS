@@ -11,14 +11,14 @@ struct ScreenshotsViewer: View {
         self.urls = urls
         self.initialIndex = initialIndex
         self.onClose = onClose
-        self._index = State(initialValue: initialIndex)
+        self._index = State(initialValue: min(max(initialIndex, 0), max(urls.count - 1, 0)))
     }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if !urls.isEmpty {
-                RemoteImage(url: urls[safe: index], contentMode: .fit) {
+            if !urls.isEmpty, let url = urls[safe: index] {
+                RemoteImage(url: url, contentMode: .fit) {
                     ProgressView().tint(.white)
                 }
                 .padding(40)
@@ -27,7 +27,7 @@ struct ScreenshotsViewer: View {
             VStack {
                 HStack {
                     Spacer()
-                    Text("\(index + 1) / \(urls.count)")
+                    Text("\(min(index + 1, urls.count)) / \(urls.count)")
                         .font(.caption.bold())
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -43,6 +43,7 @@ struct ScreenshotsViewer: View {
                             .foregroundStyle(.white)
                     }
                     .buttonStyle(.plain)
+                    .keyboardShortcut(.cancelAction)
                 }
                 .padding()
                 Spacer()
@@ -71,10 +72,11 @@ struct ScreenshotsViewer: View {
             }
         }
         .frame(minWidth: 800, minHeight: 600)
+        .background(Color.black)
     }
 }
 
-extension Array {
+private extension Array {
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
     }

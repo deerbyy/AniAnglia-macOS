@@ -9,22 +9,27 @@ final class HomeViewModel: ObservableObject {
 
     func load(api: AnixartAPI) async {
         isLoading = true
+        defer { isLoading = false }
         do {
             let watchingResp = try await api.discoverWatching(page: 0)
             self.watching = watchingResp.items
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+            watching = []
         }
         // Personal recommendations only when authed (don't fail the whole load if this fails).
-        if api.auth.isAuthenticated {
-            if let recs = try? await api.discoverRecommendations(page: 0).items {
-                self.recommendations = recs
+        if MainActor.assumeIsolated({ api.auth.isAuthenticated }) {
+            do {
+                let recs = try await api.discoverRecommendations(page: 0)
+                self.recommendations = recs.items
+            } catch {
+                // keep empty, not fatal
+                self.recommendations = []
             }
         } else {
             self.recommendations = []
         }
-        isLoading = false
     }
 }
 
@@ -63,6 +68,7 @@ struct HomeView: View {
                     Image(systemName: "arrow.clockwise")
                 }
                 .help("Обновить")
+                .disabled(vm.isLoading)
             }
         }
     }

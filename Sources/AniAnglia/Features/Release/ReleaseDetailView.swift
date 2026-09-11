@@ -6,7 +6,7 @@ final class ReleaseDetailViewModel: ObservableObject {
     @Published var videoBlocks: [VideoBlock] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
-    @Published var bookmarkCategory: Int? = nil // 0 = none, 1..5 = list category
+    @Published var bookmarkCategory: Int? = nil // nil = none, 1..5 = list category
     @Published var bookmarkPending = false
     @Published var bookmarkError: String?
     @Published var userVote: Int = 0 // 0 = none, 1..5 stars
@@ -14,24 +14,44 @@ final class ReleaseDetailViewModel: ObservableObject {
 
     func load(api: AnixartAPI, releaseId: Int64) async {
         isLoading = true
-        let loadedRelease: Release? = await {
-            do { return try await api.release(id: releaseId) }
-            catch { return nil }
-        }()
-        let loadedBlocks: [VideoBlock] = await {
-            do { return try await api.videoBlocks(releaseId: releaseId).blocks }
-            catch { return [] }
-        }()
-        if let loadedRelease {
-            release = loadedRelease
-            bookmarkCategory = loadedRelease.profileListStatus
-            userVote = loadedRelease.yourVote ?? 0
+        defer { isLoading = false }
+        // Prefetched release may already be set in View; we still fetch fresh.
+        // Use sequential try await without the `await { }()` anti-pattern which hides errors.
+        var gotRelease: Release?
+        var gotBlocks: [VideoBlock] = []
+        var loadError: String?
+
+        do {
+            gotRelease = try await api.release(id: releaseId)
+        } catch {
+            loadError = error.localizedDescription
+            gotRelease = nil
         }
-        videoBlocks = loadedBlocks
-        if release == nil && errorMessage == nil {
+
+        do {
+            let resp = try await api.videoBlocks(releaseId: releaseId)
+            gotBlocks = resp.blocks
+        } catch {
+            // Video blocks are not fatal – keep empty but don't override release error
+            gotBlocks = []
+        }
+
+        if let gotRelease {
+            release = gotRelease
+            bookmarkCategory = gotRelease.profileListStatus
+            userVote = gotRelease.yourVote ?? 0
+            errorMessage = nil
+        } else if loadError != nil {
+            // Keep prefetched case in View; only set error if no release at all
+            errorMessage = loadError
+        }
+        videoBlocks = gotBlocks
+
+        // Unified “failed to load” fallback when neither prefetched nor loaded exists.
+        // The View checks effectiveRelease, so we only set fallback if release is still nil.
+        if release == nil, errorMessage == nil {
             errorMessage = "Не удалось загрузить релиз"
         }
-        isLoading = false
     }
 
     func setRating(api: AnixartAPI, releaseId: Int64, stars: Int) async {

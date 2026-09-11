@@ -16,6 +16,10 @@ final class BookmarksViewModel: ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+            // Keep old releases on transient error? Clear only on auth error
+            if (error as? APIError)?.localizedDescription.contains("Не авторизован") == true {
+                releases = []
+            }
         }
     }
 }
@@ -40,16 +44,27 @@ struct BookmarksView: View {
             await vm.load(api: appState.api)
         }
         .onAppear {
-            if let pending = appState.pendingBookmarkCategory {
-                vm.category = pending
-                appState.pendingBookmarkCategory = nil
+            applyPendingCategoryIfNeeded()
+        }
+        .onChange(of: appState.pendingBookmarkCategory) { _, newValue in
+            if newValue != nil {
+                applyPendingCategoryIfNeeded()
             }
         }
-        .onChange(of: appState.pendingBookmarkCategory) { newValue in
-            if let pending = newValue {
-                vm.category = pending
-                appState.pendingBookmarkCategory = nil
+        // Reload when auth state changes (login/logout) – AppState forwards objectWillChange
+        .task(id: appState.auth.isAuthenticated) {
+            if appState.auth.isAuthenticated {
+                await vm.load(api: appState.api)
+            } else {
+                vm.releases = []
             }
+        }
+    }
+
+    private func applyPendingCategoryIfNeeded() {
+        if let pending = appState.pendingBookmarkCategory {
+            vm.category = pending
+            appState.pendingBookmarkCategory = nil
         }
     }
 

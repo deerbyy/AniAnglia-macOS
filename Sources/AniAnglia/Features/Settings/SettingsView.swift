@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @AppStorage("preferredVideoQuality") private var preferredQuality: String = "auto"
     @AppStorage("autoNextEpisode") private var autoNext: Bool = true
+    @State private var cacheCleared = false
 
     var body: some View {
         TabView {
@@ -17,8 +18,6 @@ struct SettingsView: View {
         }
         .padding()
     }
-
-    @State private var cacheCleared = false
 
     private var generalTab: some View {
         Form {
@@ -77,6 +76,11 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 40)
             Link("Источник: api.anixart.tv", destination: URL(string: "https://anixart.tv")!)
+            if let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
+                Text("Сборка \(build)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

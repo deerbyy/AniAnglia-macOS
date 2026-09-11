@@ -25,12 +25,21 @@ final class ProfileViewModel: ObservableObject {
     func loadBookmarkPreviews(api: AnixartAPI) async {
         previewsLoading = true
         defer { previewsLoading = false }
-        for cat in [2, 1, 3, 4, 5] {
-            do {
-                let resp = try await api.bookmarks(category: cat, page: 0)
-                previews[cat] = Array(resp.items.prefix(8))
-            } catch {
-                previews[cat] = []
+        // Load previews concurrently with TaskGroup for speed instead of sequential loop
+        await withTaskGroup(of: (Int, [Release]).self) { group in
+            for cat in [2, 1, 3, 4, 5] {
+                group.addTask {
+                    do {
+                        let resp = try await api.bookmarks(category: cat, page: 0)
+                        return (cat, Array(resp.items.prefix(8)))
+                    } catch {
+                        return (cat, [])
+                    }
+                }
+            }
+            for await (cat, items) in group {
+                // Hop back to MainActor to update @Published
+                await MainActor.run { self.previews[cat] = items }
             }
         }
     }
@@ -38,8 +47,13 @@ final class ProfileViewModel: ObservableObject {
     func signIn(api: AnixartAPI, auth: AuthStore) async {
         isWorking = true
         defer { isWorking = false }
+        let trimmedLogin = login.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedLogin.isEmpty, !password.isEmpty else {
+            errorMessage = "Введи логин и пароль"
+            return
+        }
         do {
-            let resp = try await api.signIn(login: login, password: password)
+            let resp = try await api.signIn(login: trimmedLogin, password: password)
             guard resp.code == 0, let token = resp.profileToken?.token, let pid = resp.profile?.id else {
                 errorMessage = readableSignInError(code: resp.code, fallback: resp.message)
                 return
@@ -90,6 +104,8 @@ struct ProfileView: View {
             await vm.loadCurrentProfile(api: appState.api, auth: appState.auth)
             if appState.auth.isAuthenticated {
                 await vm.loadBookmarkPreviews(api: appState.api)
+            } else {
+                vm.previews = [:]
             }
         }
     }
@@ -101,6 +117,10 @@ struct ProfileView: View {
                 profileHeader
                 if let profile = vm.profile {
                     statsGrid(for: profile)
+                } else if vm.errorMessage != nil {
+                    ErrorState(message: vm.errorMessage!) {
+                        Task { await vm.loadCurrentProfile(api: appState.api, auth: appState.auth) }
+                    }
                 }
                 Divider()
                 bookmarkSections
@@ -145,6 +165,7 @@ struct ProfileView: View {
                 } label: {
                     Label("Обновить", systemImage: "arrow.clockwise")
                 }
+                .disabled(vm.previewsLoading)
                 Button(role: .destructive) {
                     appState.auth.signOut()
                     vm.profile = nil
@@ -206,6 +227,9 @@ struct ProfileView: View {
                     HStack {
                         Circle().fill(color).frame(width: 10, height: 10)
                         Text(title).font(.title3.bold())
+                        if vm.previewsLoading && releases.isEmpty {
+                            ProgressView().controlSize(.small)
+                        }
                         Spacer()
                         Button("Все →") {
                             appState.selectSidebar(.bookmarks, bookmarkCategory: cat)
@@ -213,7 +237,7 @@ struct ProfileView: View {
                         .buttonStyle(.borderless)
                     }
                     if releases.isEmpty {
-                        Text("Список пуст")
+                        Text(vm.previewsLoading ? "Загрузка…" : "Список пуст")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                             .padding(.vertical, 8)
@@ -248,9 +272,12 @@ struct ProfileView: View {
                 TextField("Логин или e-mail", text: $vm.login)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 320)
+                    .disableAutocorrection(true)
+                    .textContentType(.username)
                 SecureField("Пароль", text: $vm.password)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 320)
+                    .textContentType(.password)
                     .onSubmit {
                         Task { await vm.signIn(api: appState.api, auth: appState.auth) }
                     }
@@ -274,7 +301,8 @@ struct ProfileView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(vm.login.isEmpty || vm.password.isEmpty || vm.isWorking)
+            .keyboardShortcut(.defaultAction)
+            .disabled(vm.login.trimmingCharacters(in: .whitespaces).isEmpty || vm.password.isEmpty || vm.isWorking)
 
             Text("Анонимный режим работает без входа — можно смотреть каталог, поиск и страницы релизов. Закладки, история, комменты и оценки требуют авторизации.")
                 .font(.caption)

@@ -2,8 +2,9 @@ import SwiftUI
 import AppKit
 
 /// Cached async image loader using NSCache + URLSession.
-@MainActor
-final class RemoteImageCache {
+/// Not @MainActor – image loading must not block the main thread.
+/// Cache itself is thread-safe (NSCache), session is Sendable via @unchecked.
+final class RemoteImageCache: @unchecked Sendable {
     static let shared = RemoteImageCache()
     private let cache = NSCache<NSURL, NSImage>()
     private let session: URLSession
@@ -13,6 +14,7 @@ final class RemoteImageCache {
         cache.totalCostLimit = 96 * 1024 * 1024
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
+        config.requestCachePolicy = .returnCacheDataElseLoad
         self.session = URLSession(configuration: config)
     }
 
@@ -23,8 +25,12 @@ final class RemoteImageCache {
     func load(_ url: URL) async -> NSImage? {
         if let cached = image(for: url) { return cached }
         do {
-            let (data, _) = try await session.data(from: url)
-            guard let image = NSImage(data: data) else { return nil }
+            let (data, response) = try await session.data(from: url)
+            // Validate HTTP response is image-like (200 and non-empty)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                return nil
+            }
+            guard !data.isEmpty, let image = NSImage(data: data) else { return nil }
             cache.setObject(image, forKey: url as NSURL, cost: data.count)
             return image
         } catch {
@@ -35,6 +41,8 @@ final class RemoteImageCache {
     func clear() {
         cache.removeAllObjects()
         URLCache.shared.removeAllCachedResponses()
+        // Also clear the custom session's cache
+        session.configuration.urlCache?.removeAllCachedResponses()
     }
 }
 
@@ -70,7 +78,12 @@ struct RemoteImage<Placeholder: View>: View {
                 image = cached
                 return
             }
-            image = await RemoteImageCache.shared.load(url)
+            // Load off-main without blocking UI; cache is Sendable
+            let loaded = await RemoteImageCache.shared.load(url)
+            // Avoid overwriting if task was cancelled / URL changed
+            if !Task.isCancelled {
+                image = loaded
+            }
         }
     }
 }

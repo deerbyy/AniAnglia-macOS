@@ -19,16 +19,14 @@ final class CatalogViewModel: ObservableObject {
     func reload(api: AnixartAPI) async {
         page = 0
         releases = []
-        await loadMore(api: api)
-    }
-
-    func loadMore(api: AnixartAPI) async {
+        totalPages = nil
+        errorMessage = nil
         if isLoading { return }
         isLoading = true
         defer { isLoading = false }
         do {
             let resp = try await api.filter(
-                page: page,
+                page: 0,
                 sort: sort,
                 category: category,
                 status: status,
@@ -37,8 +35,39 @@ final class CatalogViewModel: ObservableObject {
                 genres: Array(genres),
                 excludeGenres: excludeGenres
             )
-            releases.append(contentsOf: resp.items)
+            releases = resp.items
             totalPages = resp.totalPageCount
+            // totalPageCount may be nil -> we treat as single page until proven otherwise
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func loadMore(api: AnixartAPI) async {
+        if isLoading { return }
+        guard canLoadMore() else { return }
+        isLoading = true
+        defer { isLoading = false }
+        let next = page + 1
+        do {
+            let resp = try await api.filter(
+                page: next,
+                sort: sort,
+                category: category,
+                status: status,
+                startYear: startYear,
+                endYear: endYear,
+                genres: Array(genres),
+                excludeGenres: excludeGenres
+            )
+            // Only append if we got data; if empty, consider pagination finished
+            if resp.items.isEmpty {
+                totalPages = next // cap pagination
+            } else {
+                releases.append(contentsOf: resp.items)
+                page = next
+                totalPages = resp.totalPageCount
+            }
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -46,8 +75,13 @@ final class CatalogViewModel: ObservableObject {
     }
 
     func canLoadMore() -> Bool {
-        if let total = totalPages, total > 0 { return page + 1 < total }
-        return !releases.isEmpty
+        if releases.isEmpty { return false }
+        if let total = totalPages {
+            if total <= 0 { return false }
+            return page + 1 < total
+        }
+        // Unknown total – allow next fetch; server will return empty when exhausted
+        return true
     }
 }
 
@@ -75,7 +109,10 @@ struct CatalogView: View {
         (2, "Анонс"),
         (3, "Онгоинг")
     ]
-    private let yearOptions: [Int] = Array(stride(from: 2026, through: 1960, by: -1))
+    private var yearOptions: [Int] {
+        let currentYear = Calendar.current.component(.year, from: Date())
+        return Array(stride(from: currentYear, through: 1960, by: -1))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -168,7 +205,6 @@ struct CatalogView: View {
 
                 if vm.canLoadMore() {
                     Button {
-                        vm.page += 1
                         Task { await vm.loadMore(api: appState.api) }
                     } label: {
                         if vm.isLoading {
@@ -179,6 +215,7 @@ struct CatalogView: View {
                         }
                     }
                     .buttonStyle(.bordered)
+                    .disabled(vm.isLoading)
                     .padding(.bottom, 20)
                 }
             }

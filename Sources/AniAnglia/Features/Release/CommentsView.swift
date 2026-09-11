@@ -65,6 +65,7 @@ final class CommentsViewModel: ObservableObject {
 
     func reload(api: AnixartAPI) async {
         isLoading = true
+        defer { isLoading = false }
         page = 0
         errorMessage = nil
         do {
@@ -74,26 +75,31 @@ final class CommentsViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
-        isLoading = false
     }
 
     func loadMore(api: AnixartAPI) async {
         guard !isLoading, canLoadMore else { return }
         isLoading = true
+        defer { isLoading = false }
         let next = page + 1
         do {
             let resp = try await api.releaseComments(releaseId: releaseId, page: next, sort: sort)
+            if resp.content.isEmpty {
+                totalPages = next
+                return
+            }
             comments.append(contentsOf: resp.content)
             page = next
             totalPages = resp.totalPageCount
         } catch {
             errorMessage = error.localizedDescription
         }
-        isLoading = false
     }
 
     var canLoadMore: Bool {
+        if comments.isEmpty { return false }
         guard let total = totalPages else { return true }
+        if total <= 0 { return false }
         return page + 1 < total
     }
 }
@@ -111,7 +117,7 @@ struct CommentsView: View {
             HStack {
                 Text("Комментарии")
                     .font(.title3.bold())
-                if let total = vm.totalPages, total > 0 {
+                if vm.comments.count > 0 {
                     Text("(\(vm.comments.count))")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -124,7 +130,7 @@ struct CommentsView: View {
                 }
                 .pickerStyle(.segmented)
                 .fixedSize()
-                .onChange(of: vm.sort) { _ in
+                .onChange(of: vm.sort) { _, _ in
                     Task { await vm.reload(api: appState.api) }
                 }
             }
@@ -143,6 +149,10 @@ struct CommentsView: View {
 
             if vm.comments.isEmpty && vm.isLoading {
                 ProgressView().frame(maxWidth: .infinity, alignment: .center).padding()
+            } else if vm.comments.isEmpty && vm.errorMessage != nil {
+                ErrorState(message: vm.errorMessage!) {
+                    Task { await vm.reload(api: appState.api) }
+                }
             } else if vm.comments.isEmpty {
                 Text("Пока нет комментариев")
                     .foregroundStyle(.secondary)
@@ -171,9 +181,13 @@ struct CommentsView: View {
                             .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
+                        .disabled(vm.isLoading)
                         .padding(.top, 8)
                     }
                 }
+            }
+            if let err = vm.errorMessage, !vm.comments.isEmpty {
+                Text(err).font(.caption).foregroundStyle(.red)
             }
         }
         .task { await vm.reload(api: appState.api) }
@@ -226,7 +240,8 @@ private struct CommentRow: View {
     let onVote: (Int) -> Void
 
     private var displayedScore: Int {
-        let base = (comment.voteCount ?? 0)
+        // voteCount may be nil on some API responses – fallback to likesCount if present
+        let base = comment.voteCount ?? comment.likesCount ?? 0
         let serverVote = comment.vote ?? 0
         return base - serverVote + currentVote
     }
