@@ -176,7 +176,11 @@ struct VideoPlayerSheet: View {
                     }
                 }
             } else if let err = errorText {
-                ContentUnavailableView("Ошибка", systemImage: "exclamationmark.triangle", description: Text(err))
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle").font(.largeTitle).foregroundStyle(.secondary)
+                    Text("Ошибка").font(.headline)
+                    Text(err).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center).padding(.horizontal)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Text("Нет URL для воспроизведения")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
