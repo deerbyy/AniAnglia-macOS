@@ -74,13 +74,16 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           tail -n 500 build.log >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          # Also push log as file to repo for debugging via git fetch
-          git config user.email "ci@github.com"
-          git config user.name "CI Bot"
-          cp build.log build-failure.log || true
-          git add build-failure.log || true
-          git commit -m "ci: build failure log for $GITHUB_SHA" || true
-          git push origin HEAD:${{ github.ref_name }} || echo "push failed"
+
+      - name: Create issue with log on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          echo "Creating issue with build log"
+          gh issue create --title "Build failure $GITHUB_SHA" --body-file build.log --label "bug" 2>&1 | head -n 50 || echo "issue create failed"
+          gh gist create build.log --public --desc "Build log $GITHUB_SHA" 2>&1 | head -n 20 || echo "gist failed"
 
       - name: Locate .app
         id: locate
