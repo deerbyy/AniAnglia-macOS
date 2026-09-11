@@ -321,12 +321,12 @@ extension Notification.Name {
 // MARK: - WebView с инъекциями как в AniDesk
 struct WebView: NSViewRepresentable {
     let url: URL
-    let quality: Int
-    let speed: Double
-    let volume: Double
-    let aspectRatio: String
-    let upscaleEnabled: Bool
-    let upscaleMode: Int
+    let quality: Int = 0
+    let speed: Double = 1.0
+    let volume: Double = 0.5
+    let aspectRatio: String = "16-9"
+    let upscaleEnabled: Bool = false
+    let upscaleMode: Int = 15
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
