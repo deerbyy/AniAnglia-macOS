@@ -50,6 +50,10 @@ struct WebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.mediaTypesRequiringUserActionForPlayback = []
+        // WKWebView on macOS disables HTML5 element fullscreen by default,
+        // so the fullscreen button of embedded players (Kodik/Sibnet/VK/YouTube)
+        // silently does nothing. Enable it explicitly (public API since macOS 12.3).
+        config.preferences.isElementFullscreenEnabled = true
         let prefs = WKWebpagePreferences()
         prefs.allowsContentJavaScript = true
         config.defaultWebpagePreferences = prefs
