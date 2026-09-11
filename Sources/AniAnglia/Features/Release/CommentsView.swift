@@ -130,7 +130,7 @@ struct CommentsView: View {
                 }
                 .pickerStyle(.segmented)
                 .fixedSize()
-                .onChange(of: vm.sort) { _, _ in
+                .onChange(of: vm.sort) { _ in
                     Task { await vm.reload(api: appState.api) }
                 }
             }

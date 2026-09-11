@@ -50,8 +50,6 @@ struct WebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.mediaTypesRequiringUserActionForPlayback = []
-        config.allowsInlineMediaPlayback = true
-        config.allowsAirPlayForMediaPlayback = true
         // WKWebView on macOS disables HTML5 element fullscreen by default,
         // so the fullscreen button of embedded players (Kodik/Sibnet/VK/YouTube)
         // silently does nothing. Enable it explicitly (public API since macOS 12.3).
@@ -61,7 +59,6 @@ struct WebView: NSViewRepresentable {
         config.defaultWebpagePreferences = prefs
         let webview = WKWebView(frame: .zero, configuration: config)
         webview.allowsBackForwardNavigationGestures = false
-        webview.allowsMagnification = false
         return webview
     }
 

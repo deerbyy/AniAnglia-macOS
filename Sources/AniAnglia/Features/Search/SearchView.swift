@@ -67,7 +67,7 @@ struct SearchView: View {
                 .textFieldStyle(.plain)
                 .font(.title3)
                 .focused($searchFieldFocused)
-                .onChange(of: vm.query) { _, _ in
+                .onChange(of: vm.query) { _ in
                     vm.searchAfterDelay(api: appState.api)
                 }
                 .onSubmit {

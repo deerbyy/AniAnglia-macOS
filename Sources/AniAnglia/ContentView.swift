@@ -63,10 +63,10 @@ struct ContentView: View {
         }, message: {
             Text(randomError ?? "")
         })
-        .onChange(of: appState.selectedSidebar) { _, _ in
+        .onChange(of: appState.selectedSidebar) { _ in
             navPath = NavigationPath()
         }
-        .onChange(of: appState.pendingRelease) { _, newValue in
+        .onChange(of: appState.pendingRelease) { newValue in
             guard let release = newValue else { return }
             navPath.append(release)
             appState.pendingRelease = nil

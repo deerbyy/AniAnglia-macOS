@@ -46,7 +46,7 @@ struct BookmarksView: View {
         .onAppear {
             applyPendingCategoryIfNeeded()
         }
-        .onChange(of: appState.pendingBookmarkCategory) { _, newValue in
+        .onChange(of: appState.pendingBookmarkCategory) { newValue in
             if newValue != nil {
                 applyPendingCategoryIfNeeded()
             }
