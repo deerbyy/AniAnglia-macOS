@@ -85,6 +85,15 @@ jobs:
           gh issue create --title "Build failure $GITHUB_SHA" --body-file build.log --label "bug" 2>&1 | head -n 50 || echo "issue create failed"
           gh gist create build.log --public --desc "Build log $GITHUB_SHA" 2>&1 | head -n 20 || echo "gist failed"
 
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Locate .app
         id: locate
         run: |
