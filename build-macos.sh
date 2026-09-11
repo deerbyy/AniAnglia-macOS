@@ -13,12 +13,18 @@ if grep -q "import AppKit" Sources/AniAnglia/AniAngliaApp.swift; then echo "  �
 if grep -q "Self.baseURL.appendingPathComponent" Sources/AniAnglia/Networking/AnixartAPI.swift; then echo "  ✗ AnixartAPI.swift: найден баг appendingPathComponent"; exit 1; else echo "  ✓ AnixartAPI.swift: баг с URL исправлен"; fi
 if grep -q "RemoteImageCache.*@MainActor" Sources/AniAnglia/Common/RemoteImage.swift; then echo "  ✗ RemoteImage.swift: всё ещё @MainActor"; exit 1; else echo "  ✓ RemoteImageCache не блокирует main thread"; fi
 
-# 3. Проверка onChange сигнатур
+# 3. Проверка SwiftUI API (macOS 13 - должен быть single-param onChange, не initial:_:)
 echo "[3/6] Проверка SwiftUI API..."
-if grep -rn "onChange(of:" Sources/ | grep -v "_, _" | grep -v "_, newValue" > /tmp/old_onchange.txt; then
-  if [ -s /tmp/old_onchange.txt ]; then echo "  ✗ Найдены устаревшие onChange:"; cat /tmp/old_onchange.txt; exit 1; else echo "  ✓ все onChange обновлены"; fi
+if grep -rn "onChange(of:" Sources/ | grep -E "initial|_, _|_, newValue" > /tmp/new_onchange.txt; then
+  if [ -s /tmp/new_onchange.txt ]; then echo "  ✗ Найдены несовместимые с macOS13 onChange (требует 14+):"; cat /tmp/new_onchange.txt; exit 1; else echo "  ✓ onChange совместимы с macOS 13"; fi
 else
-  echo "  ✓ onChange проверены"
+  echo "  ✓ onChange совместимы с macOS 13"
+fi
+# Также проверяем что нет iOS-only WKWebView свойств
+if grep -rn "allowsInlineMediaPlayback\|allowsAirPlayForMediaPlayback" Sources/ > /tmp/wk_check.txt; then
+  if [ -s /tmp/wk_check.txt ]; then echo "  ✗ Найдены iOS-only WKWebView свойства:"; cat /tmp/wk_check.txt; exit 1; else echo "  ✓ WKWebView совместим с macOS"; fi
+else
+  echo "  ✓ WKWebView совместим"
 fi
 
 # 4. Проверка пагинации

@@ -50,14 +50,14 @@ var components = URLComponents(url: Self.baseURL.appendingPathComponent(path), r
 ### 10. `AppState` не прокидывал изменения `AuthStore` в SwiftUI
 `BookmarksView`, `HistoryView`, `ProfileView`, `ReleaseDetailView` используют `appState.auth.isAuthenticated`, но `AppState` не наблюдал `AuthStore.objectWillChange`. Логин/лог-аут не обновляли UI. Добавлен `auth.objectWillChange.sink { self.objectWillChange.send() }` + `cancellables`.
 
-### 11. `ContentView`, `SearchView`, `CommentsView`, `BookmarksView` — deprecated `onChange`
-Использовался старый `onChange(of:) { newValue in }` (1 параметр), deprecated в macOS 14 / Swift 6. Обновлено на `onChange(of:) { _, newValue in }`. `build-macos.sh` проверяет отсутствие старого API.
+### 11. `ContentView`, `SearchView`, `CommentsView`, `BookmarksView` — `onChange` совместимость с macOS 13
+Проект таргет `macOS 13.0` (`arm64-apple-macos13.0`). Новый API `onChange(of:initial:_:)` с двумя параметрами (`_, newValue`) требует macOS 14+ → 5 ошибок компиляции (`'onChange(of:initial:_:)' is only available in macOS 14.0 or newer`). Оставлен deprecated, но совместимый `onChange(of:) { newValue in }` / `{ _ in }` с одним параметром — компилируется на 13. `build-macos.sh` проверяет отсутствие `_, _` / `initial:`.
 
 ### 12. `SearchViewModel` — гонка и утечка `currentTask`
 `searchAfterDelay` создавал `Task { [weak self] try? await Task.sleep... if Task.isCancelled { return } }` — проверка после sleep, но не использовался `guard !Task.isCancelled`. Исправлено на `guard !Task.isCancelled else { return }` и добавлен `deinit { currentTask?.cancel() }`. Также чистка `errorMessage` при очистке поля.
 
 ### 13. `RemoteImageCache` — `@MainActor` блокировал `URLSession`
-Кэш был `@MainActor`, поэтому `load(_:)` с `session.data(from:)` выполнялся на main. Убран `@MainActor`, помечен `@unchecked Sendable`, сессия на `returnCacheDataElseLoad`, добавлен `allowsInlineMediaPlayback` в WebView, очистка кэша теперь чистит и кастомную сессию.
+Кэш был `@MainActor`, поэтому `load(_:)` с `session.data(from:)` выполнялся на main. Убран `@MainActor`, помечен `@unchecked Sendable`, сессия на `returnCacheDataElseLoad`, очистка кэша теперь чистит и кастомную сессию. (iOS-only `allowsInlineMediaPlayback`/`allowsAirPlayForMediaPlayback` не ставятся — недоступны на macOS.)
 
 ### 14. `HomeViewModel.load` — отсутствие `defer` и неправильный `try?`
 Было `try? await api.discoverRecommendations(page: 0).items` — приоритет операторов неочевиден, и `isLoading=false` не гарантировано. Переписано на `defer` и явный `do/catch` с `MainActor.assumeIsolated` для проверки `isAuthenticated`.
@@ -68,8 +68,8 @@ var components = URLComponents(url: Self.baseURL.appendingPathComponent(path), r
 ### 16. `ProfileViewModel.loadBookmarkPreviews` — последовательные запросы
 5 категорий грузились последовательно (медленно). Переписано на `withTaskGroup` конкурентно + `MainActor.run` для записи. Также добавлена валидация `trimmedLogin` и `disableAutocorrection`.
 
-### 17. `VideoPlayerSheet.WebView` — неполные настройки плеера
-Отсутствовали `allowsInlineMediaPlayback = true`, `allowsAirPlayForMediaPlayback`, `allowsMagnification = false`. Добавлены. `isElementFullscreenEnabled` сохранён (критично для фуллскрина Kodik/Sibnet).
+### 17. `VideoPlayerSheet.WebView` — iOS-only свойства ломали сборку на macOS
+`config.allowsInlineMediaPlayback` / `allowsAirPlayForMediaPlayback` и `webView.allowsMagnification` — доступны только на iOS, на macOS ошибка `WKWebViewConfiguration has no member`. Удалены. Оставлено `config.mediaTypesRequiringUserActionForPlayback=[]` и `config.preferences.isElementFullscreenEnabled=true` (критично для фуллскрина Kodik/Sibnet).
 
 ### 18. `SettingsView` — `@State` был после `body`
 В SwiftUI `@State` должен быть объявлен до `body` (иначе warning). Перемещён вверх, добавлен вывод `CFBundleVersion`.
