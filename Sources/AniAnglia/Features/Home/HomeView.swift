@@ -19,7 +19,7 @@ final class HomeViewModel: ObservableObject {
             watching = []
         }
         // Personal recommendations only when authed (don't fail the whole load if this fails).
-        if MainActor.assumeIsolated({ api.auth.isAuthenticated }) {
+        if api.auth.isAuthenticated {
             do {
                 let recs = try await api.discoverRecommendations(page: 0)
                 self.recommendations = recs.items

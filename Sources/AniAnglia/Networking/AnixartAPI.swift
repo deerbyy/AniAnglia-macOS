@@ -18,7 +18,8 @@ enum APIError: Error, LocalizedError {
     }
 }
 
-final class AnixartAPI: @unchecked Sendable {
+@MainActor
+final class AnixartAPI {
     static let baseURL = URL(string: "https://api.anixart.tv")!
     static let userAgent = "AnixartApp/9.0 beta-11-25052914 (Android 11; SDK 30; arm64-v8a; samsung; ru_RU)"
 
@@ -45,17 +46,11 @@ final class AnixartAPI: @unchecked Sendable {
     // MARK: - Helpers
     private func makeURL(path: String, query: [URLQueryItem] = []) -> URL {
         // Correctly handle multi-segment paths without percent-encoding slashes.
-        // Using URL(string:) + appending avoids the `appendingPathComponent` bug where slashes are escaped.
         var components = URLComponents(string: Self.baseURL.absoluteString)!
-        // Ensure leading slash
         let normalizedPath = path.hasPrefix("/") ? path : "/" + path
         components.path = normalizedPath
         var items = query
-        // Access auth on MainActor synchronously – MainActor.assumeIsolated is safe here
-        // because auth is @MainActor but we are not isolated. Use MainActor-assume.
-        let token: String? = MainActor.assumeIsolated { auth.token }
-        let pid: Int64? = MainActor.assumeIsolated { auth.profileId }
-        if let token, let pid {
+        if let token = auth.token, let pid = auth.profileId {
             items.append(URLQueryItem(name: "token", value: token))
             items.append(URLQueryItem(name: "profile_id", value: String(pid)))
         }
@@ -106,7 +101,6 @@ final class AnixartAPI: @unchecked Sendable {
         if data.isEmpty { throw APIError.empty }
         do {
             let envelope = try decoder.decode(T.self, from: data)
-            // If T is APIEnvelope-like and reports non-zero code, surface it
             if let coded = envelope as? CodedResponse, coded.code != 0 {
                 throw APIError.server(code: coded.code, message: coded.message)
             }

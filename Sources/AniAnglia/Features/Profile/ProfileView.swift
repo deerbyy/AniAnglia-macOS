@@ -38,8 +38,7 @@ final class ProfileViewModel: ObservableObject {
                 }
             }
             for await (cat, items) in group {
-                // Hop back to MainActor to update @Published
-                await MainActor.run { self.previews[cat] = items }
+                self.previews[cat] = items
             }
         }
     }
