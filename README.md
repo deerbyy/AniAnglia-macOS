@@ -9,6 +9,29 @@
 - **WKWebView** — встроенные плееры Kodik / Sibnet / VK / YouTube
 - **Keychain** — хранение токена авторизации
 
+## Быстрая установка (ветка с исправлениями)
+
+Скопируй в Терминал целиком — установщик сам поставит `xcodegen`, склонирует ветку `arena/01a090fc-anianglia-macos` и откроет проект:
+
+```bash
+brew install xcodegen
+git clone https://github.com/owlclockl/AniAnglia-macOS.git
+cd AniAnglia-macOS
+git checkout arena/01a090fc-anianglia-macos
+xcodegen generate
+open AniAnglia.xcodeproj
+```
+
+Одна команда (скачает и запустит `install.sh`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/owlclockl/AniAnglia-macOS/arena/01a090fc-anianglia-macos/install.sh | bash
+```
+Или если репозиторий уже склонирован:
+```bash
+chmod +x install.sh && ./install.sh
+```
+
 ## Сборка
 
 Проект генерируется через [XcodeGen](https://github.com/yonaskolb/XcodeGen) — `AniAnglia.xcodeproj` не закоммичен.
